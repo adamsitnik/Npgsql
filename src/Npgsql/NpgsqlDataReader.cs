@@ -182,7 +182,10 @@ namespace Npgsql
         /// <param name="cancellationToken">Ignored for now.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
         public override Task<bool> ReadAsync(CancellationToken cancellationToken)
-            => SynchronizationContextSwitcher.NoContext(async () => await Read(true));
+        {
+            using (NoSynchronizationContextScope.Enter())
+                return Read(true);
+        }
 
         async Task<bool> Read(bool async)
         {
@@ -318,20 +321,20 @@ namespace Npgsql
         /// <param name="cancellationToken">Currently ignored.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
         public override Task<bool> NextResultAsync(CancellationToken cancellationToken)
-            => SynchronizationContextSwitcher.NoContext(async () =>
+        {
+            try
             {
-                try
-                {
-                    return IsSchemaOnly ? await NextResultSchemaOnly(true) : await NextResult(true);
-                }
-                catch (PostgresException e)
-                {
-                    _state = ReaderState.Consumed;
-                    if (_statementIndex >= 0 && _statementIndex < _statements.Count)
-                        e.Statement = _statements[_statementIndex];
-                    throw;
-                }
-            });
+                using (NoSynchronizationContextScope.Enter())
+                    return IsSchemaOnly ? NextResultSchemaOnly(true) : NextResult(true);
+            }
+            catch (PostgresException e)
+            {
+                _state = ReaderState.Consumed;
+                if (_statementIndex >= 0 && _statementIndex < _statements.Count)
+                    e.Statement = _statements[_statementIndex];
+                throw;
+            }
+        }
 
         async Task<bool> NextResult(bool async)
         {
