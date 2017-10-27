@@ -72,7 +72,7 @@ namespace Npgsql
         int? _timeout;
         readonly NpgsqlParameterCollection _parameters;
 
-        readonly List<NpgsqlStatement> _statements;
+        List<NpgsqlStatement> _statements;
 
         /// <summary>
         /// Returns details about each statement that this command has executed.
@@ -391,74 +391,96 @@ namespace Npgsql
         public override void Prepare()
         {
             var connector = CheckReadyAndGetConnector();
-            using (connector.StartUserAction())
+            Log.Debug($"Preparing: {CommandText}", connector.Id);
+
+            // First, try to see if the CommandText has already been prepared as-is,
+            // in its entirety (including all contained statements).
+            // TODO: Same SQL, different parameter type... Cache by parameter types as well?
+            // TODO: Naming: "PreparedStatementManager" shouldn't be used for caching COMMANDS
+            // TODO: _statements was previously readonly, make sure we're OK
+            // TODO: recycle PreparedStatement arrays rather than reinstantiating
+            // TODO: Consider making _statement an array instead of a list
+            // TODO: CURRENT BUG: we're caching NpgsqlStatements across commands. This means that if I
+            // execute a command and then change its NpgsqlStatements, the cached copy is modified - boom.
+            if (connector.PreparedStatementManager.CommandsBySql.TryGetValue(CommandText, out var statements))
             {
-                for (var i = 0; i < Parameters.Count; i++)
-                    if (!Parameters[i].IsTypeExplicitlySet)
-                        throw new InvalidOperationException("The Prepare method requires all parameters to have an explicitly set type.");
-
-                ProcessRawQuery();
-                Log.Debug($"Preparing: {CommandText}", connector.Id);
-
-                var needToPrepare = false;
-                foreach (var statement in _statements)
-                {
-                    if (statement.IsPrepared)
-                        continue;
-                    statement.PreparedStatement = connector.PreparedStatementManager.GetOrAddExplicit(statement);
-                    if (statement.PreparedStatement?.State == PreparedState.NotPrepared)
-                    {
-                        statement.PreparedStatement.State = PreparedState.ToBePrepared;
-                        needToPrepare = true;
-                    }
-                }
-
-                // It's possible the command was already prepared, or that presistent prepared statements were found for
-                // all statements. Nothing to do here, move along.
-                if (!needToPrepare)
-                    return;
-
-                var sendTask = SendPrepare(false, CancellationToken.None);
-
-                // Loop over statements, skipping those that are already prepared (because they were persisted)
-                var isFirst = true;
-                foreach (var statement in _statements.Where(s => s.PreparedStatement?.State == PreparedState.BeingPrepared))
-                {
-                    var pStatement = statement.PreparedStatement;
-                    Debug.Assert(pStatement != null);
-                    Debug.Assert(pStatement.Description == null);
-                    if (pStatement.StatementBeingReplaced != null)
-                    {
-                        connector.ReadExpecting<CloseCompletedMessage>();
-                        pStatement.StatementBeingReplaced.CompleteUnprepare();
-                        pStatement.StatementBeingReplaced = null;
-                    }
-
-                    connector.ReadExpecting<ParseCompleteMessage>();
-                    connector.ReadExpecting<ParameterDescriptionMessage>();
-                    var msg = connector.ReadMessage();
-                    switch (msg.Code)
-                    {
-                    case BackendMessageCode.RowDescription:
-                        var description = (RowDescriptionMessage)msg;
-                        FixupRowDescription(description, isFirst);
-                        statement.Description = description;
-                        break;
-                    case BackendMessageCode.NoData:
-                        statement.Description = null;
-                        break;
-                    default:
-                        throw connector.UnexpectedMessageReceived(msg.Code);
-                    }
-                    pStatement.CompletePrepare();
-                    isFirst = false;
-                }
-
-                connector.ReadExpecting<ReadyForQueryMessage>();
-                sendTask.GetAwaiter().GetResult();
-
+                _statements = statements;
                 _connectorPreparedOn = connector;
+                return;
             }
+
+            for (var i = 0; i < Parameters.Count; i++)
+                if (!Parameters[i].IsTypeExplicitlySet)
+                    throw new InvalidOperationException("The Prepare method requires all parameters to have an explicitly set type.");
+
+            ProcessRawQuery();
+
+            var needToPrepare = false;
+            foreach (var statement in _statements)
+            {
+                if (statement.IsPrepared)
+                    continue;
+                statement.PreparedStatement = connector.PreparedStatementManager.GetOrAddExplicit(statement);
+                if (statement.PreparedStatement?.State == PreparedState.NotPrepared)
+                {
+                    statement.PreparedStatement.State = PreparedState.ToBePrepared;
+                    needToPrepare = true;
+                }
+            }
+
+            // It's possible the command was already prepared, or that presistent prepared statements were found for
+            // all statements. Nothing to do here, move along.
+            if (needToPrepare)
+            {
+                using (connector.StartUserAction())
+                {
+                    var sendTask = SendPrepare(false, CancellationToken.None);
+
+                    // Loop over statements, skipping those that are already prepared (because they were persisted)
+                    var isFirst = true;
+                    foreach (var statement in _statements.Where(s =>
+                        s.PreparedStatement?.State == PreparedState.BeingPrepared))
+                    {
+                        var pStatement = statement.PreparedStatement;
+                        Debug.Assert(pStatement != null);
+                        Debug.Assert(pStatement.Description == null);
+                        if (pStatement.StatementBeingReplaced != null)
+                        {
+                            connector.ReadExpecting<CloseCompletedMessage>();
+                            pStatement.StatementBeingReplaced.CompleteUnprepare();
+                            pStatement.StatementBeingReplaced = null;
+                        }
+
+                        connector.ReadExpecting<ParseCompleteMessage>();
+                        connector.ReadExpecting<ParameterDescriptionMessage>();
+                        var msg = connector.ReadMessage();
+                        switch (msg.Code)
+                        {
+                        case BackendMessageCode.RowDescription:
+                            var description = (RowDescriptionMessage)msg;
+                            FixupRowDescription(description, isFirst);
+                            statement.Description = description;
+                            break;
+                        case BackendMessageCode.NoData:
+                            statement.Description = null;
+                            break;
+                        default:
+                            throw connector.UnexpectedMessageReceived(msg.Code);
+                        }
+                        pStatement.CompletePrepare();
+                        isFirst = false;
+                    }
+
+                    connector.ReadExpecting<ReadyForQueryMessage>();
+                    sendTask.GetAwaiter().GetResult();
+
+                    _connectorPreparedOn = connector;
+                }
+            }
+
+            // We've completed preparing. Now cache the entire set of statements for when the same CommandText is used.
+            // TODO: Eject by LRU
+            connector.PreparedStatementManager.CommandsBySql[CommandText] = _statements;
         }
 
         /// <summary>
