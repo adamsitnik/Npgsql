@@ -43,6 +43,62 @@ namespace Npgsql.Tests
 {
     public class CommandTests : TestBase
     {
+        public long Sum;
+
+        [Test]
+        public void Crap2()
+        {
+            using (var conn = OpenConnection())
+            using (var cmd = new NpgsqlCommand("SELECT 8, 'hello'", conn))
+            {
+                cmd.Prepare();
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        unchecked
+                        {
+                            Sum += reader.GetInt32(0);
+                            Sum += reader.GetString(1).Length;
+                        }
+                    }
+                }
+            }
+
+            using (var conn = OpenConnection())
+            using (var cmd = new NpgsqlCommand("SELECT 8, 'hello'", conn))
+            {
+                cmd.Prepare();
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        unchecked
+                        {
+                            Sum += reader.GetInt32(0);
+                            Sum += reader.GetString(1).Length;
+                        }
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void Crap()
+        {
+            using (var conn = OpenConnection())
+            {
+                using (var cmd = new NpgsqlCommand("SELECT 1", conn))
+                {
+                    cmd.Prepare();
+                }
+                using (var cmd = new NpgsqlCommand("SELECT 1", conn))
+                {
+                    cmd.Prepare();
+                }
+            }
+        }
+
         #region Multiple Commands
 
         /// <summary>
