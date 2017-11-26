@@ -69,7 +69,7 @@ namespace Npgsql
         int? _timeout;
         readonly NpgsqlParameterCollection _parameters;
 
-        readonly List<NpgsqlStatement> _statements;
+        List<NpgsqlStatement> _statements;
 
         /// <summary>
         /// Returns details about each statement that this command has executed.
@@ -576,6 +576,25 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         Task Prepare(bool async)
         {
             var connector = CheckReadyAndGetConnector();
+
+            Log.Debug($"Preparing: {CommandText}", connector.Id);
+
+            // First, try to see if the CommandText has already been prepared as-is,
+            // in its entirety (including all contained statements).
+            // TODO: Same SQL, different parameter type... Cache by parameter types as well?
+            // TODO: Naming: "PreparedStatementManager" shouldn't be used for caching COMMANDS
+            // TODO: _statements was previously readonly, make sure we're OK
+            // TODO: recycle PreparedStatement arrays rather than reinstantiating
+            // TODO: Consider making _statement an array instead of a list
+            // TODO: CURRENT BUG: we're caching NpgsqlStatements across commands. This means that if I
+            // execute a command and then change its NpgsqlStatements, the cached copy is modified - boom.
+            if (connector.PreparedStatementManager.CommandsBySql.TryGetValue(CommandText, out var statements))
+            {
+                _statements = statements;
+                _connectorPreparedOn = connector;
+                return PGUtil.CompletedTask;
+            }
+
             for (var i = 0; i < Parameters.Count; i++)
                 if (!Parameters[i].IsTypeExplicitlySet)
                     throw new InvalidOperationException(
@@ -654,6 +673,10 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 else
                     sendTask.GetAwaiter().GetResult();
             }
+
+            // We've completed preparing. Now cache the entire set of statements for when the same CommandText is used.
+            // TODO: Eject by LRU
+            connector.PreparedStatementManager.CommandsBySql[CommandText] = _statements;
         }
 
         /// <summary>
