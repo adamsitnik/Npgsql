@@ -600,7 +600,7 @@ CREATE TYPE address AS
         }
 
         [Test]
-        public void InferNpgsqlDbType()
+        public void InferNpgsqlDbTypeWithoutConnection()
         {
             NpgsqlConnection.GlobalTypeMapper.MapComposite<Composite1>();
             try
@@ -614,6 +614,35 @@ CREATE TYPE address AS
             }
             var p2 = new NpgsqlParameter { Value = new Composite1() };
             Assert.That(() => p2.NpgsqlDbType, Throws.Exception.TypeOf<NotSupportedException>());
+        }
+
+        [Test]
+        public void InferNpgsqlDbTypeWithConnection()
+        {
+            throw new NotImplementedException();
+            using (var conn = OpenConnection())
+            {
+                conn.TypeMapper.MapComposite<Composite1>();
+                try
+                {
+                    using (var cmd = new NpgsqlCommand { Connection = conn })
+                    {
+                        var p = new NpgsqlParameter { Value = new Composite1() };
+                        cmd.Parameters.Add(p);
+                        Assert.That(p.NpgsqlDbType, Is.EqualTo(NpgsqlDbType.Composite));
+                    }
+                }
+                finally
+                {
+                    conn.TypeMapper.UnmapComposite<Composite1>();
+                }
+                using (var cmd = new NpgsqlCommand { Connection = conn })
+                {
+                    var p = new NpgsqlParameter { Value = new Composite1() };
+                    cmd.Parameters.Add(p);
+                    Assert.That(() => p.NpgsqlDbType, Throws.Exception.TypeOf<NotSupportedException>());
+                }
+            }
         }
     }
 }
