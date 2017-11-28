@@ -66,7 +66,7 @@ namespace Npgsql.TypeMapping
 
         #region Enum mapping
 
-        public INpgsqlTypeMapper MapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        public virtual INpgsqlTypeMapper MapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
             where TEnum : struct
         {
             if (!typeof(TEnum).GetTypeInfo().IsEnum)
@@ -87,7 +87,7 @@ namespace Npgsql.TypeMapping
             }.Build());
         }
 
-        public bool UnmapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null) where TEnum : struct
+        public virtual bool UnmapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null) where TEnum : struct
         {
             if (!typeof(TEnum).GetTypeInfo().IsEnum)
                 throw new ArgumentException("An enum type must be provided");
@@ -106,7 +106,7 @@ namespace Npgsql.TypeMapping
 
         #region Composite mapping
 
-        public INpgsqlTypeMapper MapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        public virtual INpgsqlTypeMapper MapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
             where T : new()
         {
             if (pgName != null && pgName.Trim() == "")
@@ -125,7 +125,7 @@ namespace Npgsql.TypeMapping
             }.Build());
         }
 
-        public bool UnmapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        public virtual bool UnmapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
             where T: new()
         {
             if (pgName != null && pgName.Trim() == "")

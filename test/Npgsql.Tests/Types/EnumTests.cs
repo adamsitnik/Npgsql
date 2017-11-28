@@ -550,6 +550,23 @@ namespace Npgsql.Tests.Types
             }
         }
 
+        [Test]
+        public void InferNpgsqlDbType()
+        {
+            NpgsqlConnection.GlobalTypeMapper.MapEnum<TestEnum>();
+            try
+            {
+                var p = new NpgsqlParameter { Value = TestEnum.Label3 };
+                Assert.That(p.NpgsqlDbType, Is.EqualTo(NpgsqlDbType.Enum));
+            }
+            finally
+            {
+                NpgsqlConnection.GlobalTypeMapper.UnmapEnum<TestEnum>();
+            }
+            var p2 = new NpgsqlParameter { Value = TestEnum.Label3 };
+            Assert.That(() => p2.NpgsqlDbType, Throws.Exception.TypeOf<NotSupportedException>());
+        }
+
         enum TestEnum
         {
             label1,

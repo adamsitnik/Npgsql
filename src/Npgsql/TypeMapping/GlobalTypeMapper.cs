@@ -125,6 +125,34 @@ namespace Npgsql.TypeMapping
             }
         }
 
+        public override INpgsqlTypeMapper MapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        {
+            var result = base.MapComposite<T>(pgName, nameTranslator);
+            _typeToNpgsqlDbType[typeof(T)] = NpgsqlDbType.Composite;
+            return result;
+        }
+
+        public override bool UnmapComposite<T>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        {
+            var result = base.UnmapComposite<T>(pgName, nameTranslator);
+            _typeToNpgsqlDbType.Remove(typeof(T));
+            return result;
+        }
+
+        public override INpgsqlTypeMapper MapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        {
+            var result = base.MapEnum<TEnum>(pgName, nameTranslator);
+            _typeToNpgsqlDbType[typeof(TEnum)] = NpgsqlDbType.Enum;
+            return result;
+        }
+
+        public override bool UnmapEnum<TEnum>(string pgName = null, INpgsqlNameTranslator nameTranslator = null)
+        {
+            var result = base.UnmapEnum<TEnum>(pgName, nameTranslator);
+            _typeToNpgsqlDbType.Remove(typeof(TEnum));
+            return result;
+        }
+
         #endregion Mapping management
 
         #region NpgsqlDbType/DbType inference for NpgsqlParameter
@@ -183,9 +211,6 @@ namespace Npgsql.TypeMapping
             var ilist = typeInfo.ImplementedInterfaces.FirstOrDefault(x => x.GetTypeInfo().IsGenericType && x.GetGenericTypeDefinition() == typeof(IList<>));
             if (ilist != null)
                 return NpgsqlDbType.Array | ToNpgsqlDbType(ilist.GetGenericArguments()[0]);
-
-            if (typeInfo.IsEnum)
-                return NpgsqlDbType.Enum;
 
             if (typeInfo.IsGenericType && type.GetGenericTypeDefinition() == typeof(NpgsqlRange<>))
                 return NpgsqlDbType.Range | ToNpgsqlDbType(type.GetGenericArguments()[0]);

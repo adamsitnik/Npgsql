@@ -29,6 +29,7 @@ using System.Data;
 using System.Linq;
 using System.Text;
 using Npgsql;
+using Npgsql.NameTranslation;
 using NpgsqlTypes;
 
 namespace Npgsql.Tests.Types
@@ -596,6 +597,23 @@ CREATE TYPE address AS
                     NpgsqlConnection.ClearPool(conn);
                 }
             }
+        }
+
+        [Test]
+        public void InferNpgsqlDbType()
+        {
+            NpgsqlConnection.GlobalTypeMapper.MapComposite<Composite1>();
+            try
+            {
+                var p = new NpgsqlParameter { Value = new Composite1() };
+                Assert.That(p.NpgsqlDbType, Is.EqualTo(NpgsqlDbType.Composite));
+            }
+            finally
+            {
+                NpgsqlConnection.GlobalTypeMapper.UnmapComposite<Composite1>();
+            }
+            var p2 = new NpgsqlParameter { Value = new Composite1() };
+            Assert.That(() => p2.NpgsqlDbType, Throws.Exception.TypeOf<NotSupportedException>());
         }
     }
 }

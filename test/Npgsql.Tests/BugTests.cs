@@ -4,6 +4,7 @@ using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Npgsql.NameTranslation;
 using NpgsqlTypes;
 using NUnit.Framework;
 #if !NETCOREAPP1_1
@@ -216,6 +217,56 @@ namespace Npgsql.Tests
                 }
             }, Throws.InvalidOperationException.With.Message.EqualTo("Some problem parsing the returned data"));
         }
+
+        [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1730")]
+        public void Bug1730()
+        {
+            var csb = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                Pooling = false,
+                MaxAutoPrepare = 500,
+                AutoPrepareMinUsages = 1
+            };
+
+            using (var conn = OpenConnection(csb))
+            {
+                conn.ExecuteNonQuery("DROP TYPE IF EXISTS public.pair");
+                conn.ExecuteNonQuery("CREATE TYPE public.pair AS (departure int, destination int)");
+                conn.ReloadTypes();
+            }
+
+            NpgsqlConnection.GlobalTypeMapper.MapComposite<Pair>("public.pair", new NpgsqlSnakeCaseNameTranslator());
+            using (var conn = OpenConnection(csb))
+            {
+                var command = conn.CreateCommand();
+                command.CommandText = "select 'test' where (1, 1) = :pair";
+                command.Parameters.Add(new NpgsqlParameter
+                {
+                    ParameterName = "pair",
+                    Value = new Pair(1, 1)
+                });
+                var name = command.ExecuteScalar()?.ToString();
+                Assert.That(name, Is.EqualTo("test"));
+            }
+        }
+
+        class Pair
+        {
+            public Pair()
+            {
+            }
+
+            public Pair(int departure, int destination)
+            {
+                Departure = departure;
+                Destination = destination;
+            }
+
+            public int Departure { get; set; }
+
+            public int Destination { get; set; }
+        }
+
 
         #region Bug1285
 
