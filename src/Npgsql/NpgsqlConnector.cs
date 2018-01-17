@@ -860,8 +860,37 @@ namespace Npgsql
 
         #region Backend message processing
 
-        internal IBackendMessage ReadMessage(DataRowLoadingMode dataRowLoadingMode=DataRowLoadingMode.NonSequential)
-            => ReadMessage(false, dataRowLoadingMode).Result;
+        [ItemCanBeNull]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal IBackendMessage ReadMessage(
+            DataRowLoadingMode dataRowLoadingMode = DataRowLoadingMode.NonSequential,
+            bool readingNotifications = false
+        )
+        {
+            // First read the responses of any prepended messages.
+            if (_pendingPrependedResponses > 0)
+                ReadPrependedMessages();
+
+            // Now read a non-prepended message
+            try
+            {
+                ReceiveTimeout = UserTimeout;
+                return DoReadMessage(dataRowLoadingMode, readingNotifications);
+            }
+            catch (PostgresException)
+            {
+                if (CurrentReader != null)
+                {
+                    // The reader cleanup will call EndUserAction
+                    CurrentReader.Cleanup();
+                }
+                else
+                {
+                    EndUserAction();
+                }
+                throw;
+            }
+        }
 
         [ItemCanBeNull]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -886,13 +915,86 @@ namespace Npgsql
                 if (CurrentReader != null)
                 {
                     // The reader cleanup will call EndUserAction
-                    await CurrentReader.Cleanup(async);
+                    await CurrentReader.Cleanup(async, false);
                 }
                 else
                 {
                     EndUserAction();
                 }
                 throw;
+            }
+        }
+
+        IBackendMessage DoReadMessage(
+            DataRowLoadingMode dataRowLoadingMode = DataRowLoadingMode.NonSequential,
+            bool readingNotifications = false,
+            bool isPrependedMessage = false)
+        {
+            PostgresException error = null;
+
+            while (true)
+            {
+                ReadBuffer.Ensure(5);
+                var messageCode = (BackendMessageCode)ReadBuffer.ReadByte();
+                PGUtil.ValidateBackendMessageCode(messageCode);
+                var len = ReadBuffer.ReadInt32() - 4;  // Transmitted length includes itself
+
+                if ((messageCode == BackendMessageCode.DataRow && dataRowLoadingMode != DataRowLoadingMode.NonSequential) ||
+                     messageCode == BackendMessageCode.CopyData)
+                {
+                    if (dataRowLoadingMode == DataRowLoadingMode.Skip)
+                    {
+                        ReadBuffer.Skip(len);
+                        continue;
+                    }
+                }
+                else if (len > ReadBuffer.ReadBytesLeft)
+                {
+                    if (len > ReadBuffer.Size)
+                    {
+                        if (_origReadBuffer == null)
+                            _origReadBuffer = ReadBuffer;
+                        ReadBuffer = ReadBuffer.AllocateOversize(len);
+                    }
+                    ReadBuffer.Ensure(len);
+                }
+
+                var msg = ParseServerMessage(ReadBuffer, messageCode, len, isPrependedMessage);
+
+                switch (messageCode) {
+                case BackendMessageCode.ErrorResponse:
+                    Debug.Assert(msg == null);
+
+                    // An ErrorResponse is (almost) always followed by a ReadyForQuery. Save the error
+                    // and throw it as an exception when the ReadyForQuery is received (next).
+                    error = new PostgresException(ReadBuffer);
+
+                    if (State == ConnectorState.Connecting) {
+                        // During the startup/authentication phase, an ErrorResponse isn't followed by
+                        // an RFQ. Instead, the server closes the connection immediately
+                        throw error;
+                    }
+
+                    continue;
+
+                case BackendMessageCode.ReadyForQuery:
+                    if (error != null)
+                        throw error;
+                    break;
+
+                // Asynchronous messages which can come anytime, they have already been handled
+                // in ParseServerMessage. Read the next message.
+                case BackendMessageCode.NoticeResponse:
+                case BackendMessageCode.NotificationResponse:
+                case BackendMessageCode.ParameterStatus:
+                    Debug.Assert(msg == null);
+                    if (!readingNotifications)
+                        continue;
+                    return null;
+                }
+
+                Debug.Assert(msg != null, "Message is null for code: " + messageCode);
+                return msg;
             }
         }
 
@@ -1074,6 +1176,22 @@ namespace Npgsql
             }
         }
 
+        void ReadPrependedMessages()
+        {
+            Debug.Assert(_pendingPrependedResponses > 0);
+            try
+            {
+                ReceiveTimeout = InternalCommandTimeout;
+                for (; _pendingPrependedResponses > 0; _pendingPrependedResponses--)
+                    DoReadMessage(DataRowLoadingMode.Skip, false, true);
+            }
+            catch (PostgresException)
+            {
+                Break();
+                throw;
+            }
+        }
+
         async Task ReadPrependedMessages(bool async)
         {
             Debug.Assert(_pendingPrependedResponses > 0);
@@ -1109,6 +1227,20 @@ namespace Npgsql
         }
 
         internal IBackendMessage SkipUntil(BackendMessageCode stopAt) => SkipUntil(stopAt, false).Result;
+
+        internal IBackendMessage SkipUntil(BackendMessageCode stopAt1, BackendMessageCode stopAt2)
+        {
+            Debug.Assert(stopAt1 != BackendMessageCode.DataRow, "Shouldn't be used for rows, doesn't know about sequential");
+            Debug.Assert(stopAt2 != BackendMessageCode.DataRow, "Shouldn't be used for rows, doesn't know about sequential");
+
+            while (true) {
+                var msg = ReadMessage(DataRowLoadingMode.Skip);
+                Debug.Assert(!(msg is DataRowMessage));
+                if (msg.Code == stopAt1 || msg.Code == stopAt2) {
+                    return msg;
+                }
+            }
+        }
 
         /// <summary>
         /// Reads backend messages and discards them, stopping only after a message of the given types has
@@ -1147,7 +1279,16 @@ namespace Npgsql
         }
 
         internal T ReadExpecting<T>() where T : class, IBackendMessage
-            => ReadExpecting<T>(false).GetAwaiter().GetResult();
+        {
+            var msg = ReadMessage();
+            var asExpected = msg as T;
+            if (asExpected == null)
+            {
+                Break();
+                throw new NpgsqlException($"Received backend message {msg.Code} while expecting {typeof(T).Name}. Please file a bug.");
+            }
+            return asExpected;
+        }
 
         #endregion Backend message processing
 

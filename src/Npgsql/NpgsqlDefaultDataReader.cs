@@ -71,6 +71,7 @@ namespace Npgsql
                 ? PGUtil.TrueTask : PGUtil.FalseTask;
         }
 
+        /*
         protected override Task<bool> NextResult(bool async, bool isConsuming=false)
         {
             var task = base.NextResult(async, isConsuming);
@@ -87,7 +88,7 @@ namespace Npgsql
             }
 
             return task;
-        }
+        }*/
 
         /// <summary>
         /// The first row in a stored procedure command that has output parameters needs to be traversed twice -

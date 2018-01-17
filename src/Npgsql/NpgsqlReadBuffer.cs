@@ -106,11 +106,38 @@ namespace Npgsql
         /// </summary>
         public Task Ensure(int count, bool async) => Ensure(count, async, false);
 
-        internal void Ensure(int count)
+        public void Ensure(int count)
         {
-            if (count <= ReadBytesLeft)
-                return;
-            Ensure(count, false).GetAwaiter().GetResult();
+            Debug.Assert(count <= Size);
+            Debug.Assert(count > ReadBytesLeft);
+            count -= ReadBytesLeft;
+            if (count <= 0) { return; }
+
+            if (ReadPosition == _filledBytes) {
+                Clear();
+            } else if (count > Size - _filledBytes) {
+                Array.Copy(Buffer, ReadPosition, Buffer, 0, ReadBytesLeft);
+                _filledBytes = ReadBytesLeft;
+                ReadPosition = 0;
+            }
+
+            try
+            {
+                while (count > 0)
+                {
+                    var toRead = Size - _filledBytes;
+                    var read = Underlying.Read(Buffer, _filledBytes, toRead);
+                    if (read == 0)
+                        throw new EndOfStreamException();
+                    count -= read;
+                    _filledBytes += read;
+                }
+            }
+            catch (Exception e)
+            {
+                Connector.Break();
+                throw new NpgsqlException("Exception while reading from stream", e);
+            }
         }
 
         internal Task Ensure(int count, bool async, bool dontBreakOnTimeouts)
@@ -179,7 +206,21 @@ namespace Npgsql
         /// <param name="len"></param>
         internal void Skip(long len)
         {
-            Debug.Assert(ReadBytesLeft >= len);
+            Debug.Assert(len >= 0);
+
+            if (len > ReadBytesLeft)
+            {
+                len -= ReadBytesLeft;
+                while (len > Size)
+                {
+                    Clear();
+                    Ensure(Size);
+                    len -= Size;
+                }
+                Clear();
+                Ensure((int)len);
+            }
+
             ReadPosition += (int)len;
         }
 

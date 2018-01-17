@@ -789,7 +789,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
         }
 
-        async ValueTask<NpgsqlDataReader> Execute(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
+        NpgsqlDataReader Execute(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
             ValidateParameters();
             if ((behavior & CommandBehavior.SequentialAccess) != 0 && Parameters.HasOutputParameters)
@@ -854,7 +854,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // to prevents a dependency on the thread pool (which would also trigger deadlocks).
                     // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
                     // send functions can switch to the special async mode when needed.
-                    sendTask = SendExecute(async);
+                    SendExecute(async);
+                    sendTask = PGUtil.CompletedTask;
                 }
                 else
                 {
@@ -872,10 +873,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     ? (NpgsqlDataReader)new NpgsqlDefaultDataReader(this, behavior, _statements, sendTask)
                     : new NpgsqlSequentialDataReader(this, behavior, _statements, sendTask);
                 connector.CurrentReader = reader;
-                if (async)
-                    await reader.NextResultAsync(cancellationToken);
-                else
-                    reader.NextResult();
+                reader.NextResult();
                 return reader;
             }
             catch
@@ -905,7 +903,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 SynchronizationContext.SetSynchronizationContext(null);
         }
 
-        async Task SendExecute(bool async)
+        void SendExecute(bool async)
         {
             BeginSend();
             var connector = Connection.Connector;
@@ -924,12 +922,12 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     if (pStatement?.StatementBeingReplaced != null)
                     {
                         // We have a prepared statement that replaces an existing statement - close the latter first.
-                        await connector.CloseMessage
+                        connector.CloseMessage
                             .Populate(StatementOrPortal.Statement, pStatement.StatementBeingReplaced.Name)
                             .Write(buf, async);
                     }
 
-                    await connector.ParseMessage
+                    connector.ParseMessage
                         .Populate(statement.SQL, statement.StatementName, statement.InputParameters, connector.TypeMapper)
                         .Write(buf, async);
                 }
@@ -940,21 +938,21 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     bind.AllResultTypesAreUnknown = AllResultTypesAreUnknown;
                 else if (i == 0 && UnknownResultTypeList != null)
                     bind.UnknownResultTypeList = UnknownResultTypeList;
-                await connector.BindMessage.Write(buf, async);
+                connector.BindMessage.Write(buf, async);
 
                 if (pStatement == null || pStatement.State == PreparedState.ToBePrepared)
                 {
-                    await connector.DescribeMessage
+                    connector.DescribeMessage
                         .Populate(StatementOrPortal.Portal)
                         .Write(buf, async);
                     if (statement.PreparedStatement != null)
                         statement.PreparedStatement.State = PreparedState.BeingPrepared;
                 }
 
-                await ExecuteMessage.DefaultExecute.Write(buf, async);
+                ExecuteMessage.DefaultExecute.Write(buf, async);
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
+            SyncMessage.Instance.Write(buf, async);
+            buf.Flush();
             CleanupSend();
         }
 
@@ -1106,14 +1104,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// Executes a SQL statement against the connection and returns the number of rows affected.
         /// </summary>
         /// <returns>The number of rows affected if known; -1 otherwise.</returns>
-        public override int ExecuteNonQuery() => ExecuteNonQuery(false, CancellationToken.None).GetAwaiter().GetResult();
+        public override int ExecuteNonQuery() => ExecuteNonQuery(false, CancellationToken.None);
 
         /// <summary>
         /// Asynchronous version of <see cref="ExecuteNonQuery()"/>
         /// </summary>
         /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
         /// <returns>A task representing the asynchronous operation, with the number of rows affected if known; -1 otherwise.</returns>
-        public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+#pragma warning disable 1998
+        public override async Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+#pragma warning restore 1998
         {
             cancellationToken.ThrowIfCancellationRequested();
             using (NoSynchronizationContextScope.Enter())
@@ -1121,14 +1121,14 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        async Task<int> ExecuteNonQuery(bool async, CancellationToken cancellationToken)
+        int ExecuteNonQuery(bool async, CancellationToken cancellationToken)
         {
             var connector = CheckReadyAndGetConnector();
             using (connector.StartUserAction(this))
             using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd).Cancel(), this))
-            using (var reader = await Execute(CommandBehavior.Default, async, cancellationToken))
+            using (var reader = Execute(CommandBehavior.Default, async, cancellationToken))
             {
-                while (async ? await reader.NextResultAsync(cancellationToken) : reader.NextResult()) {}
+                while (reader.NextResult()) {}
                 reader.Close();
                 return reader.RecordsAffected;
             }
@@ -1163,7 +1163,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [ItemCanBeNull]
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
         async ValueTask<object> ExecuteScalar(bool async, CancellationToken cancellationToken)
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
         {
             var connector = CheckReadyAndGetConnector();
             var behavior = CommandBehavior.SingleRow;
@@ -1171,7 +1173,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 behavior |= CommandBehavior.SequentialAccess;
             using (connector.StartUserAction(this))
             using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd).Cancel(), this))
-            using (var reader = await Execute(behavior, async, cancellationToken))
+            using (var reader = Execute(behavior, async, cancellationToken))
                 return reader.Read() && reader.FieldCount != 0 ? reader.GetValue(0) : null;
         }
 
@@ -1207,27 +1209,31 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// <param name="cancellationToken">A task representing the operation.</param>
         /// <returns></returns>
         protected override Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+        /*
         {
+
             cancellationToken.ThrowIfCancellationRequested();
             using (NoSynchronizationContextScope.Enter())
-                return ExecuteDbDataReader(behavior, true, cancellationToken).AsTask();
-        }
+                return ExecuteDbDataReader(behavior, true, cancellationToken);
+        }*/
 
         /// <summary>
         /// Executes the command text against the connection.
         /// </summary>
         [NotNull]
-        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => ExecuteDbDataReader(behavior, false, CancellationToken.None).GetAwaiter().GetResult();
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) =>
+            ExecuteDbDataReader(behavior, false, CancellationToken.None);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        async ValueTask<DbDataReader> ExecuteDbDataReader(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
+        DbDataReader ExecuteDbDataReader(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
             var connector = CheckReadyAndGetConnector();
             connector.StartUserAction(this);
             try
             {
                 using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd).Cancel(), this))
-                    return await Execute(behavior, async, cancellationToken);
+                    return Execute(behavior, async, cancellationToken);
             }
             catch
             {

@@ -92,7 +92,7 @@ namespace Npgsql
 
         #region I/O
 
-        public async Task Flush(bool async)
+        public Task Flush(bool async)
         {
             if (_copyMode)
             {
@@ -100,20 +100,17 @@ namespace Npgsql
                 // written to the beginning of the buffer, but we need to go back and write the
                 // length.
                 if (_writePosition == 1)
-                    return;
+                    return PGUtil.CompletedTask;
                 var pos = _writePosition;
                 _writePosition = 1;
                 WriteInt32(pos - 1);
                 _writePosition = pos;
             } else if (_writePosition == 0)
-                return;
+                return PGUtil.CompletedTask;
 
             try
             {
-                if (async)
-                    await Underlying.WriteAsync(_buf, 0, _writePosition);
-                else
-                    Underlying.Write(_buf, 0, _writePosition);
+                Underlying.Write(_buf, 0, _writePosition);
             }
             catch (Exception e)
             {
@@ -123,10 +120,7 @@ namespace Npgsql
 
             try
             {
-                if (async)
-                    await Underlying.FlushAsync();
-                else
-                    Underlying.Flush();
+                Underlying.Flush();
             }
             catch (Exception e)
             {
@@ -143,6 +137,7 @@ namespace Npgsql
             }
             if (_copyMode)
                 WriteCopyDataHeader();
+            return PGUtil.CompletedTask;
         }
 
         internal void Flush() => Flush(false).GetAwaiter().GetResult();
@@ -305,21 +300,21 @@ namespace Npgsql
             return WriteStringLong(s, charLen, byteLen, async);
         }
 
-        async Task WriteStringLong(string s, int charLen, int byteLen, bool async)
+        Task WriteStringLong(string s, int charLen, int byteLen, bool async)
         {
             Debug.Assert(byteLen > WriteSpaceLeft);
             if (byteLen <= Size)
             {
                 // String can fit entirely in an empty buffer. Flush and retry rather than
                 // going into the partial writing flow below (which requires ToCharArray())
-                await Flush(async);
+                Flush();
                 WriteString(s, charLen);
             }
             else
             {
 #if NETSTANDARD1_3
-                await WriteChars(s.ToCharArray(), 0, charLen, byteLen, async);
-                return;
+                WriteChars(s.ToCharArray(), 0, charLen, byteLen, async);
+                return PGUtil.CompletedTask;
 #else
                 var charPos = 0;
                 while (true)
@@ -327,11 +322,12 @@ namespace Npgsql
                     WriteStringChunked(s, charPos, charLen - charPos, true, out var charsUsed, out var completed);
                     if (completed)
                         break;
-                    await Flush(async);
+                    Flush();
                     charPos += charsUsed;
                 }
 #endif
             }
+            return PGUtil.CompletedTask;
         }
 
         internal Task WriteChars(char[] chars, int offset, int charLen, int byteLen, bool async)

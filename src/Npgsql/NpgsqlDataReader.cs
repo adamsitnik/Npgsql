@@ -268,8 +268,9 @@ namespace Npgsql
         {
             try
             {
-                return (IsSchemaOnly ? NextResultSchemaOnly(false) : NextResult(false))
-                    .GetAwaiter().GetResult();
+                if (IsSchemaOnly)
+                    throw new NotImplementedException();
+                return NextResult(false);
             }
             catch (PostgresException e)
             {
@@ -291,7 +292,7 @@ namespace Npgsql
             try
             {
                 using (NoSynchronizationContextScope.Enter())
-                    return IsSchemaOnly ? NextResultSchemaOnly(true) : NextResult(true);
+                    return IsSchemaOnly ? NextResultSchemaOnly(true) : NextResult(true, false);
             }
             catch (PostgresException e)
             {
@@ -306,6 +307,134 @@ namespace Npgsql
         /// Internal implementation of NextResult
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected virtual bool NextResult(bool isConsuming=false)
+        {
+            IBackendMessage msg;
+            Debug.Assert(!IsSchemaOnly);
+
+            // If we're in the middle of a resultset, consume it
+            switch (State)
+            {
+            case ReaderState.BeforeResult:
+            case ReaderState.InResult:
+                ConsumeRow(false);
+                var completedMsg = Connector.SkipUntil(BackendMessageCode.CompletedResponse, BackendMessageCode.EmptyQueryResponse);
+                ProcessMessage(completedMsg);
+                break;
+
+            case ReaderState.BetweenResults:
+                break;
+
+            case ReaderState.Consumed:
+            case ReaderState.Closed:
+                return false;
+            default:
+                throw new ArgumentOutOfRangeException();
+            }
+
+            Debug.Assert(State == ReaderState.BetweenResults);
+            _hasRows = false;
+
+            if ((Behavior & CommandBehavior.SingleResult) != 0 && StatementIndex == 0 && !isConsuming)
+            {
+                Consume();
+                return false;
+            }
+
+            // We are now at the end of the previous result set. Read up to the next result set, if any.
+            // Non-prepared statements receive ParseComplete, BindComplete, DescriptionRow/NoData,
+            // prepared statements receive only BindComplete
+            for (StatementIndex++; StatementIndex < _statements.Count; StatementIndex++)
+            {
+                var statement = _statements[StatementIndex];
+                if (statement.IsPrepared)
+                {
+                    Connector.ReadExpecting<BindCompleteMessage>();
+                    RowDescription = statement.Description;
+                }
+                else  // Non-prepared flow
+                {
+                    var pStatement = statement.PreparedStatement;
+                    if (pStatement != null)
+                    {
+                        Debug.Assert(!pStatement.IsPrepared);
+                        Debug.Assert(pStatement.Description == null);
+                        if (pStatement.StatementBeingReplaced != null)
+                        {
+                            Connector.ReadExpecting<CloseCompletedMessage>();
+                            pStatement.StatementBeingReplaced.CompleteUnprepare();
+                            pStatement.StatementBeingReplaced = null;
+                        }
+                    }
+
+                    Connector.ReadExpecting<ParseCompleteMessage>();
+                    Connector.ReadExpecting<BindCompleteMessage>();
+                    msg = Connector.ReadMessage();
+                    switch (msg.Code)
+                    {
+                    case BackendMessageCode.NoData:
+                        RowDescription = statement.Description = null;
+                        break;
+                    case BackendMessageCode.RowDescription:
+                        // We have a resultset
+                        RowDescription = statement.Description = (RowDescriptionMessage)msg;
+                        break;
+                    default:
+                        throw Connector.UnexpectedMessageReceived(msg.Code);
+                    }
+
+                    if (pStatement != null)
+                    {
+                        Debug.Assert(!pStatement.IsPrepared);
+                        pStatement.CompletePrepare();
+                    }
+                }
+
+                //msg = ReadMessage();
+                msg = Connector.ReadMessage();
+                if (RowDescription == null)
+                {
+                    // Statement did not generate a resultset (e.g. INSERT)
+                    // Read and process its completion message and move on to the next statement
+
+                    switch (msg.Code)
+                    {
+                    case BackendMessageCode.CompletedResponse:
+                    case BackendMessageCode.EmptyQueryResponse:
+                        break;
+                    default:
+                        throw Connector.UnexpectedMessageReceived(msg.Code);
+                    }
+
+                    ProcessMessage(msg);
+                    continue;
+                }
+
+                switch (msg.Code)
+                {
+                case BackendMessageCode.DataRow:
+                case BackendMessageCode.CompletedResponse:
+                    break;
+                default:
+                    throw Connector.UnexpectedMessageReceived(msg.Code);
+                }
+
+                ProcessMessage(msg);
+                return true;
+            }
+
+            // There are no more queries, we're done. Read to the RFQ.
+            ProcessMessage(Connector.ReadExpecting<ReadyForQueryMessage>());
+            RowDescription = null;
+            return false;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="async"></param>
+        /// <param name="isConsuming"></param>
+        /// <returns></returns>
         protected virtual async Task<bool> NextResult(bool async, bool isConsuming=false)
         {
             IBackendMessage msg;
@@ -340,7 +469,7 @@ namespace Npgsql
                 return false;
             }
 
-            // We are now at the end of the previous result set. Read up to the next result set, if any.
+                        // We are now at the end of the previous result set. Read up to the next result set, if any.
             // Non-prepared statements receive ParseComplete, BindComplete, DescriptionRow/NoData,
             // prepared statements receive only BindComplete
             for (StatementIndex++; StatementIndex < _statements.Count; StatementIndex++)
@@ -545,6 +674,17 @@ namespace Npgsql
 
         #region Cleanup / Dispose
 
+        void Consume()
+        {
+            // Skip over the other result sets. Note that this does tally records affected
+            // from CommandComplete messages, and properly sets state for auto-prepared statements
+            if (IsSchemaOnly)
+                throw new NotImplementedException();
+                //while (await NextResultSchemaOnly(async)) {}
+            else
+                while (NextResult(true)) {}
+        }
+
         /// <summary>
         /// Consumes all result sets for this reader, leaving the connector ready for sending and processing further
         /// queries
@@ -601,6 +741,31 @@ namespace Npgsql
                 await Consume(async);
 
             await Cleanup(async, connectionClosing);
+        }
+
+        internal void Cleanup(bool connectionClosing=false)
+        {
+            Log.Trace("Cleaning up reader", Connector.Id);
+
+            // Make sure the send task for this command, which may have executed asynchronously and in
+            // parallel with the reading, has completed, throwing any exceptions it generated.
+            _sendTask.GetAwaiter().GetResult();
+
+            State = ReaderState.Closed;
+            Command.State = CommandState.Idle;
+            Connector.CurrentReader = null;
+            Connector.EndUserAction();
+
+            // If the reader is being closed as part of the connection closing, we don't apply
+            // the reader's CommandBehavior.CloseConnection
+            if ((Behavior & CommandBehavior.CloseConnection) != 0 && !connectionClosing)
+                _connection.Close();
+
+            if (ReaderClosed != null)
+            {
+                ReaderClosed(this, EventArgs.Empty);
+                ReaderClosed = null;
+            }
         }
 
         internal async Task Cleanup(bool async, bool connectionClosing=false)
