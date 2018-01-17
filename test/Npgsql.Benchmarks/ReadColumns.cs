@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 
 namespace Npgsql.Benchmarks
@@ -23,6 +24,7 @@ namespace Npgsql.Benchmarks
         {
             _conn = BenchmarkEnvironment.OpenConnection();
             _cmd = new NpgsqlCommand(Queries[NumColumns], _conn);
+            _cmd.Prepare();
         }
 
         [GlobalCleanup]
@@ -33,14 +35,30 @@ namespace Npgsql.Benchmarks
         }
 
         [Benchmark]
-        public int IntColumn()
+        public async Task<int> IntColumnAsync()
+        {
+            unchecked
+            {
+                var x = 0;
+                using (var reader = await _cmd.ExecuteReaderAsync())
+                {
+                    await reader.ReadAsync();
+                    for (var i = 0; i < NumColumns; i++)
+                        x += reader.GetInt32(i);
+                }
+                return x;
+            }
+        }
+
+        [Benchmark]
+        public async Task<int> IntColumn()
         {
             unchecked
             {
                 var x = 0;
                 using (var reader = _cmd.ExecuteReader())
                 {
-                    reader.Read();
+                    await reader.ReadAsync();
                     for (var i = 0; i < NumColumns; i++)
                         x += reader.GetInt32(i);
                 }
