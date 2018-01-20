@@ -590,9 +590,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             // execute a command and then change its NpgsqlStatements, the cached copy is modified - boom.
             if (connector.PreparedStatementManager.CommandsBySql.TryGetValue(CommandText, out var statements))
             {
-                _statements = statements;
-                _connectorPreparedOn = connector;
-                return PGUtil.CompletedTask;
+               throw new NotSupportedException("TEST");
             }
 
             for (var i = 0; i < Parameters.Count; i++)
