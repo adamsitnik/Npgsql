@@ -1648,6 +1648,9 @@ namespace Npgsql
 
         internal UserAction StartUserAction(ConnectorState newState=ConnectorState.Executing, NpgsqlCommand command=null)
         {
+            return new UserAction(this);
+
+            /*
             lock (this)
             {
                 if (!_userLock.Wait(0))
@@ -1694,10 +1697,12 @@ namespace Npgsql
                     throw;
                 }
             }
+            */
         }
 
         internal void EndUserAction()
         {
+            /*
             Debug.Assert(CurrentReader == null);
 
             lock (this)
@@ -1716,6 +1721,7 @@ namespace Npgsql
                 _userLock.Release();
                 State = ConnectorState.Ready;
             }
+            */
         }
 
         bool IsInUserAction => _userLock.CurrentCount == 0;
