@@ -1202,7 +1202,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
                     //lock (connector.CancelLock) { }
 
-                    connector.UserTimeout = CommandTimeout * 1000;
+                    //connector.UserTimeout = CommandTimeout * 1000;
 
                     if ((behavior & CommandBehavior.SchemaOnly) == 0)
                     {
