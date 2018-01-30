@@ -1212,7 +1212,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     Task sendTask;
 
                     // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
-                    lock (connector.CancelLock) { }
+                    //lock (connector.CancelLock) { }
 
                     connector.UserTimeout = CommandTimeout * 1000;
 
