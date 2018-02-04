@@ -433,6 +433,7 @@ namespace Npgsql
 
                 if (Settings.Pooling && SupportsDiscard)
                     GenerateResetMessage();
+                Counters.NumberOfNonPooledConnections.Increment();
                 Counters.HardConnectsPerSecond.Increment();
                 Log.Trace($"Opened connection to {Host}:{Port}");
             }
@@ -1481,6 +1482,11 @@ namespace Npgsql
         /// (e.g. prepared statements), resetting parameters to their defaults, and resetting client-side
         /// state
         /// </summary>
+        /// <remarks>
+        /// It's important that this method be idempotent, since some race conditions in the pool
+        /// can cause it to be called twice (and also the user may close the connection right after
+        /// allocating it, without doing anything).
+        /// </remarks>
         internal void Reset()
         {
             Debug.Assert(State == ConnectorState.Ready);

@@ -73,7 +73,7 @@ namespace Npgsql
         /// The connector object connected to the backend.
         /// </summary>
         [CanBeNull]
-        internal NpgsqlConnector Connector { get; set; }
+        internal NpgsqlConnector Connector;
 
         /// <summary>
         /// The parsed connection string set by the user
@@ -214,7 +214,34 @@ namespace Npgsql
             _pool = pools.GetOrAdd(_connectionString, _pool);
         }
 
-        async Task Open(bool async, CancellationToken cancellationToken)
+        Task Open(bool async, CancellationToken cancellationToken)
+        {
+            // This is an optimized path for when a connection can be taken from the pool
+            // with no waiting or I/O
+
+            CheckConnectionClosed();
+
+            Log.Trace("Opening connection...");
+
+            if (_pool == null || Settings.Enlist || !_pool.TryAllocateFast(this, out Connector))
+                return OpenLong(async, cancellationToken);
+
+            _userFacingConnectionString = _pool.UserFacingConnectionString;
+
+            Counters.SoftConnectsPerSecond.Increment();
+
+            // Since this pooled connector was opened, global mappings may have
+            // changed. Bring this up to date if needed.
+            var mapper = Connector.TypeMapper;
+            if (mapper.ChangeCounter != TypeMapping.GlobalTypeMapper.Instance.ChangeCounter)
+                mapper.Reset();
+
+            Log.Debug("Connection opened", Connector.Id);
+            OnStateChange(new StateChangeEventArgs(ConnectionState.Closed, ConnectionState.Open));
+            return PGUtil.CompletedTask;
+        }
+
+        async Task OpenLong(bool async, CancellationToken cancellationToken)
         {
             CheckConnectionClosed();
 
@@ -227,6 +254,7 @@ namespace Npgsql
                 Debug.Assert(Settings != null);
 
                 var timeout = new NpgsqlTimeout(TimeSpan.FromSeconds(ConnectionTimeout));
+                Transaction transaction = null;
 
                 if (_pool == null) // Unpooled connection
                 {
@@ -243,22 +271,28 @@ namespace Npgsql
 
                     if (Settings.Enlist)
                     {
-                        if (Transaction.Current != null)
+                        transaction = Transaction.Current;
+                        if (transaction != null)
                         {
                             // First, check to see if we have a connection enlisted to this transaction which has been closed.
                             // If so, return that as an optimization rather than opening a new one and triggering escalation
                             // to a distributed transaction.
                             Connector = _pool.TryAllocateEnlistedPending(Transaction.Current);
                             if (Connector != null)
-                                EnlistedTransaction = Transaction.Current;
+                                EnlistedTransaction = transaction;
                         }
+
                         if (Connector == null)
-                            Connector = await _pool.Allocate(this, timeout, async, cancellationToken);
+                        {
+                            // If Enlist is true, we skipped the fast path above, try it here first,
+                            // before going to the long path.
+                            // TODO: Maybe find a more elegant way to factor this code...
+                            if (!_pool.TryAllocateFast(this, out Connector))
+                                Connector = await _pool.AllocateLong(this, timeout, async, cancellationToken);
+                        }
                     }
                     else  // No enlist
-                        Connector = await _pool.Allocate(this, timeout, async, cancellationToken);
-
-                    Counters.SoftConnectsPerSecond.Increment();
+                        Connector = await _pool.AllocateLong(this, timeout, async, cancellationToken);
 
                     // Since this pooled connector was opened, global mappings may have
                     // changed. Bring this up to date if needed.
@@ -268,7 +302,7 @@ namespace Npgsql
                 }
 
                 // We may have gotten an already enlisted pending connector above, no need to enlist in that case
-                if (Settings.Enlist && Transaction.Current != null && EnlistedTransaction == null)
+                if (transaction != null && EnlistedTransaction == null)
                     EnlistTransaction(Transaction.Current);
             }
             catch
