@@ -856,14 +856,14 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         async Task SendExecute(bool async)
         {
-            BeginSend();
+            //BeginSend();
             var connector = Connection.Connector;
             Debug.Assert(connector != null);
 
             var buf = connector.WriteBuffer;
             for (var i = 0; i < _statements.Count; i++)
             {
-                async = ForceAsyncIfNecessary(async, i);
+                //async = ForceAsyncIfNecessary(async, i);
 
                 var statement = _statements[i];
                 var pStatement = statement.PreparedStatement;
@@ -904,7 +904,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
             await SyncMessage.Instance.Write(buf, async);
             await buf.Flush(async);
-            CleanupSend();
+            //CleanupSend();
         }
 
         async Task SendExecuteSchemaOnly(bool async)
