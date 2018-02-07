@@ -27,6 +27,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -97,6 +98,9 @@ namespace Npgsql
             Underlying = stream;
             Size = size;
             Buffer = new byte[Size];
+            // Pin globally to avoid the overhead of pinning/unpinning every time this is passed
+            // to socket I/O. In real life we need to unpin on close...!
+            GCHandle.Alloc(Buffer, GCHandleType.Pinned);
             TextEncoding = textEncoding;
             _textDecoder = TextEncoding.GetDecoder();
             _workspace = new byte[8];

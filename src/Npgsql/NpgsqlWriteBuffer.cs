@@ -86,6 +86,9 @@ namespace Npgsql
             Underlying = stream;
             Size = size;
             _buf = new byte[Size];
+            // Pin globally to avoid the overhead of pinning/unpinning every time this is passed
+            // to socket I/O. In real life we need to unpin on close...!
+            GCHandle.Alloc(_buf, GCHandleType.Pinned);
             TextEncoding = textEncoding;
             _textEncoder = TextEncoding.GetEncoder();
         }
