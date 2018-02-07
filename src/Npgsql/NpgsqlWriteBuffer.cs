@@ -118,8 +118,9 @@ namespace Npgsql
                     */
                 if (async)
                 {
-                    AwaitableSocket.SetBuffer(_buf, 0, WritePosition);
-                    await AwaitableSocket.SendAsync();
+                    throw new NotSupportedException("No async");
+                    //AwaitableSocket.SetBuffer(_buf, 0, WritePosition);
+                    //await AwaitableSocket.SendAsync();
                 }
                 else
                     Underlying.Write(_buf, 0, WritePosition);

@@ -120,6 +120,8 @@ namespace Npgsql
 
         async Task EnsureLong(int count, bool async, bool dontBreakOnTimeouts=false)
         {
+            if (async)
+                throw new NotSupportedException("No async!");
             Debug.Assert(count <= Size);
             Debug.Assert(count > ReadBytesLeft);
             count -= ReadBytesLeft;

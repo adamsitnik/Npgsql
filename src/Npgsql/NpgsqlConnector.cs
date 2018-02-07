@@ -494,7 +494,8 @@ namespace Npgsql
             try
             {
                 if (async)
-                    await ConnectAsync(timeout, cancellationToken);
+                    throw new NotSupportedException("No async!");
+                    //await ConnectAsync(timeout, cancellationToken);
                 else
                     Connect(timeout);
 
@@ -632,7 +633,7 @@ namespace Npgsql
                 var protocolType = endpoint.AddressFamily == AddressFamily.InterNetwork ? ProtocolType.Tcp : ProtocolType.IP;
                 var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, protocolType)
                 {
-                    Blocking = false
+                    //Blocking = false
                 };
 
                 try
@@ -646,6 +647,7 @@ namespace Npgsql
                         if (e.SocketErrorCode != SocketError.WouldBlock)
                             throw;
                     }
+                    /*
                     var write = new List<Socket> { socket };
                     var error = new List<Socket> { socket };
                     Socket.Select(null, write, error, perEndpointTimeout);
@@ -665,6 +667,7 @@ namespace Npgsql
                         continue;
                     }
                     socket.Blocking = true;
+                    */
                     SetSocketOptions(socket);
                     _socket = socket;
                     return;
@@ -953,9 +956,12 @@ namespace Npgsql
                                 int read;
                                 if (async)
                                 {
+                                    throw new NotSupportedException("No async!");
+                                    /*
                                     _awaitableSocket.SetBuffer(ReadBuffer.Buffer, ReadBuffer._filledBytes, toRead);
                                     await _awaitableSocket.ReceiveAsync();
                                     read = _awaitableSocket.BytesTransferred;
+                                    */
                                 } else
                                     read = _stream.Read(ReadBuffer.Buffer, ReadBuffer._filledBytes, toRead);
 
