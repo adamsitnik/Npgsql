@@ -12,18 +12,97 @@ using System.Transactions;
 
 namespace Npgsql
 {
+    /// <summary>
+    /// Provides lookup for a pool based on a connection string.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="TryGetValue"/> is lock-free, to avoid contention, but the same isn't
+    /// true of <see cref="GetOrAdd"/>, which acquires a lock. The calling code always tries
+    /// <see cref="TryGetValue"/> before trying to <see cref="GetOrAdd"/>.
+    /// </remarks>
     static class PoolManager
     {
-        /// <summary>
-        /// Holds connector pools indexed by their connection strings.
-        /// </summary>
-        internal static ConcurrentDictionary<string, ConnectorPool> Pools { get; }
-            = new ConcurrentDictionary<string, ConnectorPool>();
+        internal const int InitialPoolsSize = 10;
 
-        /// <summary>
-        /// Maximum number of possible connections in the pool.
-        /// </summary>
-        internal const int PoolSizeLimit = 1024;
+        static (string Key, ConnectorPool Pool)[] _pools = new (string, ConnectorPool)[InitialPoolsSize];
+        static int _nextSlot;
+
+        internal static bool TryGetValue(string key, out ConnectorPool pool)
+        {
+            // Note that pools never get removed. _pools is strictly append-only.
+            var pools = _pools;
+
+            // First scan the pools and do reference equality on the connection strings
+            for (var i = 0; i < _nextSlot; i++)
+            {
+                if (ReferenceEquals(pools[i].Key, key))
+                {
+                    // It's possible that this pool entry is currently being written: the connection string
+                    // component has already been writte, but the pool component is just about to be. So we
+                    // loop on the pool until it's non-null
+                    while (pools[i].Pool == null)
+                        Thread.Sleep(10);
+                    pool = pools[i].Pool;
+                    return true;
+                }
+            }
+
+            // Next try value comparison on the strings
+            for (var i = 0; i < _nextSlot; i++)
+            {
+                if (pools[i].Key == key)
+                {
+                    // See comment above
+                    while (pools[i].Pool == null)
+                        Thread.Sleep(10);
+                    pool = pools[i].Pool;
+                    return true;
+                }
+            }
+
+            pool = null;
+            return false;
+        }
+
+        internal static ConnectorPool GetOrAdd(string key, ConnectorPool pool)
+        {
+            lock (_pools)
+            {
+                if (TryGetValue(key, out var result))
+                    return result;
+
+                // May need to grow the array.
+                if (_nextSlot == _pools.Length)
+                {
+                    var newPools = new (string, ConnectorPool)[_pools.Length * 2];
+                    Array.Copy(_pools, newPools, _pools.Length);
+                    Interlocked.Exchange(ref _pools, newPools);
+                }
+
+                _pools[_nextSlot].Key = key;
+                _pools[_nextSlot].Pool = pool;
+                Interlocked.Increment(ref _nextSlot);
+                return pool;
+            }
+        }
+
+        internal static void Clear(string connString)
+        {
+            Debug.Assert(connString != null);
+
+            if (TryGetValue(connString, out var pool))
+                pool.Clear();
+        }
+
+        internal static void ClearAll()
+        {
+            for (var i = 0; i < _nextSlot; i++)
+            {
+                if (_pools[i].Key == null)
+                    return;
+                _pools[i].Pool?.Clear();
+            }
+        }
 
         static PoolManager()
         {
@@ -33,19 +112,21 @@ namespace Npgsql
             AppDomain.CurrentDomain.ProcessExit += (sender, args) => ClearAll();
         }
 
-        internal static void Clear(string connString)
+#if DEBUG
+        /// <summary>
+        /// Resets the pool manager to its initial state, for test purposes only.
+        /// Assumes that no other threads are accessing the pool.
+        /// </summary>
+        internal static void Reset()
         {
-            Debug.Assert(connString != null);
-
-            if (Pools.TryGetValue(connString, out var pool))
-                pool.Clear();
+            lock (_pools)
+            {
+                ClearAll();
+                _pools = new (string, ConnectorPool)[InitialPoolsSize];
+                _nextSlot = 0;
+            }
         }
-
-        internal static void ClearAll()
-        {
-            foreach (var kvp in Pools)
-                kvp.Value.Clear();
-        }
+#endif
     }
 
     /// <summary>
@@ -102,6 +183,11 @@ namespace Npgsql
         [CanBeNull]
         Timer _pruningTimer;
         readonly TimeSpan _pruningInterval;
+
+        /// <summary>
+        /// Maximum number of possible connections in any pool.
+        /// </summary>
+        internal const int PoolSizeLimit = 1024;
 
         static readonly NpgsqlLogger Log = NpgsqlLogManager.GetCurrentClassLogger();
 

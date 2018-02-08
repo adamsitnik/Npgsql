@@ -63,7 +63,7 @@ namespace Npgsql.Tests
         public void MinPoolSizeLargerThanPoolSizeLimit()
         {
             var csb = new NpgsqlConnectionStringBuilder(ConnectionString);
-            Assert.That(() => csb.MinPoolSize = PoolManager.PoolSizeLimit + 1, Throws.Exception.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => csb.MinPoolSize = ConnectorPool.PoolSizeLimit + 1, Throws.Exception.TypeOf<ArgumentOutOfRangeException>());
         }
 
         [Test]
@@ -230,7 +230,7 @@ namespace Npgsql.Tests
             using (var conn2 = OpenConnection(connString))
             using (var conn3 = OpenConnection(connString))
             {
-                var pool = PoolManager.Pools[connString];
+                Assert.That(PoolManager.TryGetValue(ConnectionString, out var pool), Is.True);
 
                 conn1.Close();
                 conn2.Close();
@@ -288,43 +288,12 @@ namespace Npgsql.Tests
         }
 
         [Test]
-        public void ClearAll()
-        {
-            using (OpenConnection()) {}
-            // Now have one connection in the pool
-            var pool = PoolManager.Pools[ConnectionString];
-            Assert.That(pool.IdleCount, Is.EqualTo(1));
-
-            NpgsqlConnection.ClearAllPools();
-            Assert.That(pool.IdleCount, Is.Zero);
-            Assert.That(pool.Total, Is.Zero);
-        }
-
-        [Test]
-        public void ClearAllWithBusy()
-        {
-            ConnectorPool pool;
-            using (OpenConnection())
-            {
-                using (OpenConnection()) { }
-                // We have one idle, one busy
-
-                NpgsqlConnection.ClearAllPools();
-                pool = PoolManager.Pools[ConnectionString];
-                Assert.That(pool.IdleCount, Is.Zero);
-                Assert.That(pool.Total, Is.EqualTo(1));
-            }
-            Assert.That(pool.IdleCount, Is.Zero);
-            Assert.That(pool.Total, Is.Zero);
-        }
-
-        [Test]
         public void ClearPool()
         {
             NpgsqlConnection conn;
             using (conn = OpenConnection()) {}
             // Now have one connection in the pool
-            var pool = PoolManager.Pools[ConnectionString];
+            Assert.That(PoolManager.TryGetValue(ConnectionString, out var pool), Is.True);
             Assert.That(pool.IdleCount, Is.EqualTo(1));
 
             NpgsqlConnection.ClearPool(conn);
@@ -341,7 +310,7 @@ namespace Npgsql.Tests
                 NpgsqlConnection.ClearPool(conn);
                 // conn is still busy but should get closed when returned to the pool
 
-                pool = PoolManager.Pools[ConnectionString];
+                Assert.That(PoolManager.TryGetValue(ConnectionString, out pool), Is.True);
                 Assert.That(pool.IdleCount, Is.Zero);
                 Assert.That(pool.Total, Is.EqualTo(1));
             }

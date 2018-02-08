@@ -702,8 +702,8 @@ namespace Npgsql
             get => _minPoolSize;
             set
             {
-                if (value < 0 || value > PoolManager.PoolSizeLimit)
-                    throw new ArgumentOutOfRangeException(nameof(value), value, "MinPoolSize must be between 0 and " + PoolManager.PoolSizeLimit);
+                if (value < 0 || value > ConnectorPool.PoolSizeLimit)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "MinPoolSize must be between 0 and " + ConnectorPool.PoolSizeLimit);
 
                 _minPoolSize = value;
                 SetValue(nameof(MinPoolSize), value);
@@ -724,8 +724,8 @@ namespace Npgsql
             get => _maxPoolSize;
             set
             {
-                if (value < 0 || value > PoolManager.PoolSizeLimit)
-                    throw new ArgumentOutOfRangeException(nameof(value), value, "MaxPoolSize must be between 0 and " + PoolManager.PoolSizeLimit);
+                if (value < 0 || value > ConnectorPool.PoolSizeLimit)
+                    throw new ArgumentOutOfRangeException(nameof(value), value, "MaxPoolSize must be between 0 and " + ConnectorPool.PoolSizeLimit);
 
                 _maxPoolSize = value;
                 SetValue(nameof(MaxPoolSize), value);

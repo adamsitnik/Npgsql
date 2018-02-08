@@ -513,7 +513,7 @@ Exception {2}",
                 scope.Complete();
             }
             AssertNumberOfRows(1);
-            var pool = PoolManager.Pools[connString];
+            Assert.That(PoolManager.TryGetValue(ConnectionString, out var pool), Is.True);
             Assert.That(pool.IdleCount, Is.EqualTo(1));
 
             using (var conn = new NpgsqlConnection(connString))
