@@ -125,6 +125,7 @@ namespace Npgsql.Tests.Types
                     {
                         Assert.That(reader.GetBoolean(i), Is.True);
                         Assert.That(reader.GetValue(i), Is.True);
+                        Assert.That(reader.GetFieldValue<bool>(i), Is.True);
                         Assert.That(reader.GetProviderSpecificValue(i), Is.True);
                         Assert.That(reader.GetFieldType(i), Is.EqualTo(typeof(bool)));
                         Assert.That(reader.GetDataTypeName(i), Is.EqualTo("bool"));

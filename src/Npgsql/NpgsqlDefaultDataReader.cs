@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.TypeHandlers;
+using Npgsql.TypeHandlers.NumericHandlers;
 using Npgsql.TypeHandling;
 
 namespace Npgsql
@@ -338,6 +339,95 @@ namespace Npgsql
             Buffer.ReadPosition = _columns[_column].Offset + posInColumn;
             PosInColumn = posInColumn;
             return PGUtil.CompletedTask;
+        }
+
+        #region Optimized simple value getters
+
+        // For the simple built-in types, we bypass the type handler hierarchy for added speed
+
+        public override bool GetBoolean(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == BoolHandler.TypeOID
+                   ? Buffer.ReadByte() != 0
+                   : GetFieldValue<bool>(ordinal);
+        }
+
+        public override short GetInt16(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == Int16Handler.TypeOID
+                ? Buffer.ReadInt16()
+                : GetFieldValue<short>(ordinal);
+        }
+
+        public override int GetInt32(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == Int32Handler.TypeOID
+                ? Buffer.ReadInt32()
+                : GetFieldValue<int>(ordinal);
+        }
+
+        public override long GetInt64(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == Int64Handler.TypeOID
+                ? Buffer.ReadInt64()
+                : GetFieldValue<long>(ordinal);
+        }
+
+        // DateTime is complicated because of timestamp vs. timestamptz
+
+        public override string GetString(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == Int64Handler.TypeOID
+                ? Buffer.ReadString(ColumnLen)
+                : GetFieldValue<string>(ordinal);
+        }
+
+        public override decimal GetDecimal(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == NumericHandler.TypeOID
+                ? NumericHandler.ReadNumeric(Buffer, ColumnLen)
+                : GetFieldValue<decimal>(ordinal);
+        }
+
+        public override double GetDouble(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == DoubleHandler.TypeOID
+                ? Buffer.ReadDouble()
+                : GetFieldValue<double>(ordinal);
+        }
+
+        public override float GetFloat(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == SingleHandler.TypeOID
+                ? Buffer.ReadSingle()
+                : GetFieldValue<float>(ordinal);
+        }
+
+        public override Guid GetGuid(int ordinal)
+        {
+            SeekToNonNullColumn(ordinal);
+            return RowDescription[ordinal].TypeOID == UuidHandler.TypeOID
+                ? UuidHandler.ReadGuid(Buffer)
+                : GetFieldValue<Guid>(ordinal);
+        }
+
+        #endregion Optimized simple value getters
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void SeekToNonNullColumn(int column)
+        {
+            CheckRowAndOrdinal(column);
+            SeekToColumn(column);
+            if (ColumnLen == -1)
+                throw new InvalidCastException("Column is null");
         }
     }
 }

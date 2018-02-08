@@ -36,7 +36,12 @@ namespace Npgsql.TypeHandlers
     [TypeMapping("uuid", NpgsqlDbType.Uuid, DbType.Guid, typeof(Guid))]
     class UuidHandler : NpgsqlSimpleTypeHandler<Guid>, INpgsqlSimpleTypeHandler<string>
     {
+        internal const uint TypeOID = 2950;
+
         public override Guid Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
+            => ReadGuid(buf);
+
+        internal static Guid ReadGuid(NpgsqlReadBuffer buf)
         {
             var a = buf.ReadInt32();
             var b = buf.ReadInt16();

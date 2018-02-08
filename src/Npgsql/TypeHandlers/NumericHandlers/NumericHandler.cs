@@ -43,6 +43,8 @@ namespace Npgsql.TypeHandlers.NumericHandlers
         INpgsqlSimpleTypeHandler<float>, INpgsqlSimpleTypeHandler<double>,
         INpgsqlSimpleTypeHandler<string>
     {
+        internal const uint TypeOID = 1700;
+
         #region Read
 
         static readonly decimal[] Decimals = {
@@ -64,6 +66,9 @@ namespace Npgsql.TypeHandlers.NumericHandlers
         };
 
         public override decimal Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
+            => ReadNumeric(buf, len);
+
+        internal static decimal ReadNumeric(NpgsqlReadBuffer buf, int len)
         {
             var numGroups = (ushort)buf.ReadInt16();
             var weightFirstGroup = buf.ReadInt16(); // 10000^weight

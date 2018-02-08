@@ -77,6 +77,7 @@ namespace Npgsql.Tests.Types
                         Assert.That(reader.GetFloat(i), Is.EqualTo(8.0f));
                         Assert.That(reader.GetDouble(i), Is.EqualTo(8.0d));
                         Assert.That(reader.GetDecimal(i), Is.EqualTo(8.0m));
+                        Assert.That(reader.GetFieldValue<short>(i), Is.EqualTo(8));
                         Assert.That(reader.GetValue(i), Is.EqualTo(8));
                         Assert.That(reader.GetProviderSpecificValue(i), Is.EqualTo(8));
                         Assert.That(reader.GetFieldType(i), Is.EqualTo(typeof(short)));
@@ -114,6 +115,7 @@ namespace Npgsql.Tests.Types
                         Assert.That(reader.GetFloat(i),                 Is.EqualTo(8.0f));
                         Assert.That(reader.GetDouble(i),                Is.EqualTo(8.0d));
                         Assert.That(reader.GetDecimal(i),               Is.EqualTo(8.0m));
+                        Assert.That(reader.GetFieldValue<int>(i),       Is.EqualTo(8));
                         Assert.That(reader.GetValue(i),                 Is.EqualTo(8));
                         Assert.That(reader.GetProviderSpecificValue(i), Is.EqualTo(8));
                         Assert.That(reader.GetFieldType(i),             Is.EqualTo(typeof(int)));
@@ -170,6 +172,7 @@ namespace Npgsql.Tests.Types
                         Assert.That(reader.GetFloat(i),                 Is.EqualTo(8.0f));
                         Assert.That(reader.GetDouble(i),                Is.EqualTo(8.0d));
                         Assert.That(reader.GetDecimal(i),               Is.EqualTo(8.0m));
+                        Assert.That(reader.GetFieldValue<long>(i),      Is.EqualTo(8));
                         Assert.That(reader.GetValue(i),                 Is.EqualTo(8));
                         Assert.That(reader.GetProviderSpecificValue(i), Is.EqualTo(8));
                         Assert.That(reader.GetFieldType(i),             Is.EqualTo(typeof(long)));
@@ -200,6 +203,7 @@ namespace Npgsql.Tests.Types
                     for (var i = 0; i < cmd.Parameters.Count; i++)
                     {
                         Assert.That(reader.GetDouble(i), Is.EqualTo(expected).Within(10E-07));
+                        Assert.That(reader.GetFieldValue<double>(i), Is.EqualTo(expected).Within(10E-07));
                         Assert.That(reader.GetFieldType(i), Is.EqualTo(typeof(double)));
                     }
                 }
@@ -242,6 +246,7 @@ namespace Npgsql.Tests.Types
                     for (var i = 0; i < cmd.Parameters.Count; i++)
                     {
                         Assert.That(reader.GetFloat(i), Is.EqualTo(expected).Within(10E-07));
+                        Assert.That(reader.GetFieldValue<float>(i), Is.EqualTo(expected).Within(10E-07));
                         Assert.That(reader.GetFieldType(i), Is.EqualTo(typeof(float)));
                     }
                 }
@@ -319,6 +324,7 @@ namespace Npgsql.Tests.Types
                             Assert.That(reader.GetByte(i),                  Is.EqualTo(8));
                             Assert.That(reader.GetFloat(i),                 Is.EqualTo(8.0f));
                             Assert.That(reader.GetDouble(i),                Is.EqualTo(8.0d));
+                            Assert.That(reader.GetFieldValue<decimal>(i),   Is.EqualTo(8.0m));
                             Assert.That(reader.GetValue(i),                 Is.EqualTo(8));
                             Assert.That(reader.GetProviderSpecificValue(i), Is.EqualTo(8));
                             Assert.That(reader.GetFieldType(i),             Is.EqualTo(typeof(decimal)));
