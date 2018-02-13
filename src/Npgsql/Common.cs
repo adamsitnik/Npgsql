@@ -148,7 +148,7 @@ namespace Npgsql
     /// <summary>
     /// The way how to order bytes.
     /// </summary>
-    enum ByteOrder
+    public enum ByteOrder
     {
         // ReSharper disable once InconsistentNaming
         /// <summary>

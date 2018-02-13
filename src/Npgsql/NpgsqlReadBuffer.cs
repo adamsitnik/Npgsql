@@ -455,7 +455,7 @@ namespace Npgsql
 
         #region Read PostGIS
 
-        internal int ReadInt32(ByteOrder bo)
+        public int ReadInt32(ByteOrder bo)
         {
             Debug.Assert(ReadBytesLeft >= sizeof(int));
             int result;
@@ -475,7 +475,7 @@ namespace Npgsql
             return result;
         }
 
-        internal uint ReadUInt32(ByteOrder bo)
+        public uint ReadUInt32(ByteOrder bo)
         {
             Debug.Assert(ReadBytesLeft >= sizeof(int));
             uint result;
@@ -495,7 +495,7 @@ namespace Npgsql
             return result;
         }
 
-        internal double ReadDouble(ByteOrder bo)
+        public double ReadDouble(ByteOrder bo)
         {
             Debug.Assert(ReadBytesLeft >= sizeof(double));
 
