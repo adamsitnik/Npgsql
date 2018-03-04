@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
@@ -166,7 +167,19 @@ namespace Npgsql
         readonly NpgsqlConnector[] _idle;
 
         readonly ConcurrentQueue<(TaskCompletionSource<NpgsqlConnector> TaskCompletionSource, bool IsAsync)> _waiting;
-        int _waitingCount;
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct State2
+        {
+            [FieldOffset(0)]
+            internal int NumBusy;
+            [FieldOffset(4)]
+            internal int NumWaiting;
+            [FieldOffset(0)]
+            internal long Both;
+        }
+
+        State2 State;
 
         /// <summary>
         /// Incremented every time this pool is cleared via <see cref="NpgsqlConnection.ClearPool"/> or
@@ -212,6 +225,26 @@ namespace Npgsql
         {
             Counters.SoftConnectsPerSecond.Increment();
 
+            // First, increment the busy counter to "allocate" a new connection. This has to happen now, before scanning
+            // the idle list, otherwise there could be a race condition where someone else thinks Busy < max and creates
+            // a new physical connection, where in fact we're transitioning Busy to max. This would increase busy beyond
+            // max
+
+            // Increment the busy counter
+            while (true)
+            {
+                var state = State;
+                var newState = state;
+                newState.NumBusy++;
+                if (newState.NumBusy > _max)
+                {
+                    connector = null;
+                    return false;
+                }
+                if (Interlocked.CompareExchange(ref State.Both, newState.Both, state.Both) == state.Both)
+                    break;
+            }
+
             // We start scanning for an idle connector in "random" places in the array, to avoid
             // too much interlocked operations "contention" at the beginning.
             var start = Thread.CurrentThread.ManagedThreadId % _max;
@@ -248,6 +281,9 @@ namespace Npgsql
                 return true;
             }
 
+            // We failed to find an idle connector, decrement busy back
+            Interlocked.Decrement(ref State.NumBusy);
+
             connector = null;
             return false;
         }
@@ -261,94 +297,25 @@ namespace Npgsql
             // the next release will unblock it.
             while (true)
             {
-                var oldTotal = Total;
-                if (oldTotal >= _max) // Pool is exhausted, wait for a close
+                var state = State;
+                var newState = state;
+
+                if (state.NumBusy < _max)
                 {
-                    // The moment _waitingCount becomes non-zero, release attempts will block on the waiting queue and
-                    // not go through to the idle list. This prevents a race condition where a connector makes it
-                    // into the idle list but we're stuck in the waiting list until we time out.
-                    Interlocked.Increment(ref _waitingCount);
-
-                    try
+                    // We're under the pool's max capacity, try to "allocate" a slot for a new physical connection.
+                    newState.NumBusy++;
+                    if (Interlocked.CompareExchange(ref State.Both, newState.Both, state.Both) != state.Both)
                     {
-                        // A connector may have slipped into the idle list before we increased the waiting count.
-                        // Pass over the idle list once again
-                        if (TryAllocateFast(conn, out var connector))
-                        {
-                            Interlocked.Decrement(ref _waitingCount);
-                            return connector;
-                        }
-
-                        // We now know that the idle list is empty and will stay empty. Enqueue an open attempt
-                        // into the waiting queue so that the next release attempt will unblock us.
-                        // TODO: Async cancellation
-                        var tcs = new TaskCompletionSource<NpgsqlConnector>();
-                        _waiting.Enqueue((tcs, async));
-
-                        try
-                        {
-                            if (async)
-                            {
-                                if (timeout.IsSet)
-                                {
-                                    var timeLeft = timeout.TimeLeft;
-                                    if (timeLeft <= TimeSpan.Zero || tcs.Task != await Task.WhenAny(tcs.Task, Task.Delay(timeLeft)))
-                                        throw new NpgsqlException($"The connection pool has been exhausted, either raise MaxPoolSize (currently {_max}) or Timeout (currently {Settings.Timeout} seconds)");
-                                }
-                                else
-                                    await tcs.Task;
-                            }
-                            else
-                            {
-                                if (timeout.IsSet)
-                                {
-                                    var timeLeft = timeout.TimeLeft;
-                                    if (timeLeft <= TimeSpan.Zero || !tcs.Task.Wait(timeLeft))
-                                        throw new NpgsqlException($"The connection pool has been exhausted, either raise MaxPoolSize (currently {_max}) or Timeout (currently {Settings.Timeout} seconds)");
-                                }
-                                else
-                                    tcs.Task.Wait();
-                            }
-                        }
-                        catch
-                        {
-                            // We're here if the timeout expired or the cancellation token was triggered.
-                            // Transition our Task to cancelled, so that the next time someone releases
-                            // a connection they'll skip over it.
-                            if (tcs.TrySetCanceled())
-                                throw;
-                            // If we've failed to cancel, someone has released a connection in the meantime
-                            // and we're good to go.
-                        }
-
-                        Debug.Assert(tcs.Task.IsCompleted);
-                        connector = tcs.Task.Result;
-                        // Note that we don't update counters or any state since the connector is being
-                        // handed off from one open connection to another.
-                        connector.Connection = conn;
-                        return connector;
+                        // Our attempt to increment the busy count failed, Loop again and retry.
+                        continue;
                     }
-                    finally
-                    {
-                        Interlocked.Decrement(ref _waitingCount);
-                    }
-                }
 
-                // Try to "allocate" a slot for a new physical connection. If we increase the total connections and
-                // are still under the max, we can create a new physical connection. Otherwise loop back again.
-                if (Interlocked.CompareExchange(ref Total, oldTotal + 1, oldTotal) == oldTotal)
-                {
+                    // We've managed to increase the busy counter, open a physical connections
                     var connector = new NpgsqlConnector(conn) { ClearCounter = _clearCounter };
-                    try
-                    {
-                        await connector.Open(timeout, async, cancellationToken);
-                    }
-                    catch
-                    {
-                        // Total has already been incremented, decrement it back
-                        Interlocked.Decrement(ref Total);
-                        throw;
-                    }
+                    await connector.Open(timeout, async, cancellationToken);
+
+                    var total = Interlocked.Increment(ref Total);
+                    Debug.Assert(total <= _max);
 
                     Counters.NumberOfActiveConnections.Increment();
                     Counters.NumberOfPooledConnections.Increment();
@@ -367,6 +334,86 @@ namespace Npgsql
                     }
 
                     return connector;
+                }
+
+                // Pool is exhausted. Increase the waiting count while atomically making sure the busy count
+                // doesn't decrease (otherwise we have a new idle connector).
+                Debug.Assert(state.NumBusy == _max);
+                newState.NumWaiting++;
+                if (Interlocked.CompareExchange(ref State.Both, newState.Both, state.Both) != state.Both)
+                {
+                    // Our attempt to increment the waiting count failed, either because a connector became idle (busy
+                    // changed) or the waiting count changed. Loop again and retry.
+                    continue;
+                }
+
+                // At this point the waiting count is non-zero, so new release calls are blocking on the waiting
+                // queue. This avoids a race condition where we wait while another connector is put back in the
+                // idle list - we know the idle list and empty and will stay empty.
+                // We also know that busy is equal to _max (pool is exhausted).
+
+                try
+                {
+                    // Enqueue an open attempt into the waiting queue so that the next release attempt will unblock us.
+                    // TODO: Async cancellation
+                    var tcs = new TaskCompletionSource<NpgsqlConnector>();
+                    _waiting.Enqueue((tcs, async));
+
+                    try
+                    {
+                        if (async)
+                        {
+                            if (timeout.IsSet)
+                            {
+                                var timeLeft = timeout.TimeLeft;
+                                if (timeLeft <= TimeSpan.Zero || tcs.Task != await Task.WhenAny(tcs.Task, Task.Delay(timeLeft)))
+                                    throw new NpgsqlException($"The connection pool has been exhausted, either raise MaxPoolSize (currently {_max}) or Timeout (currently {Settings.Timeout} seconds)");
+                            }
+                            else
+                                await tcs.Task;
+                        }
+                        else
+                        {
+                            if (timeout.IsSet)
+                            {
+                                var timeLeft = timeout.TimeLeft;
+                                if (timeLeft <= TimeSpan.Zero || !tcs.Task.Wait(timeLeft))
+                                    throw new NpgsqlException($"The connection pool has been exhausted, either raise MaxPoolSize (currently {_max}) or Timeout (currently {Settings.Timeout} seconds)");
+                            }
+                            else
+                                tcs.Task.Wait();
+                        }
+                    }
+                    catch
+                    {
+                        // We're here if the timeout expired or the cancellation token was triggered.
+                        // Transition our Task to cancelled, so that the next time someone releases
+                        // a connection they'll skip over it.
+                        if (tcs.TrySetCanceled())
+                            throw;
+                        // If we've failed to cancel, someone has released a connection in the meantime
+                        // and we're good to go.
+                    }
+
+                    Debug.Assert(tcs.Task.IsCompleted);
+                    var connector = tcs.Task.Result;
+                    // Note that we don't update counters or any state since the connector is being
+                    // handed off from one open connection to another.
+                    connector.Connection = conn;
+                    return connector;
+                }
+                finally
+                {
+                    // Decrement the waiting count
+                    while (true)
+                    {
+                        state = State;
+                        newState = state;
+                        newState.NumWaiting--;
+                        Debug.Assert(newState.NumWaiting >= 0, $"Decreased waiting count to {newState.NumWaiting}");
+                        if (Interlocked.CompareExchange(ref State.Both, newState.Both, state.Both) == state.Both)
+                            break;
+                    }
                 }
             }
 
@@ -389,69 +436,90 @@ namespace Npgsql
 
             connector.Reset();
 
-            // If there are any pending open attempts in progress hand the connector off to
-            // them directly.
-            while (_waitingCount > 0)
+            while (true)
             {
-                if (!_waiting.TryDequeue(out var waitingOpenAttempt))
+                var state = State;
+
+                // If there are any pending open attempts in progress hand the connector off to them directly.
+                // Note that in this case, state changes (i.e. decrementing State.Waiting) happens at the allocating
+                // side.
+                if (state.NumWaiting > 0)
                 {
-                    // _waitingCount has been increased, but there's nothing in the queue yet - someone is in the
-                    // process of enqueuing an open attempt. Wait and retry.
-                    Thread.Sleep(5);
-                    continue;
-                }
-
-                var tcs = waitingOpenAttempt.TaskCompletionSource;
-
-                // We have a pending open attempt. "Complete" it, handing off the connector.
-                if (waitingOpenAttempt.IsAsync)
-                {
-                    // If the waiting open attempt is asynchronous (i.e. OpenAsync()), we can't simply
-                    // call SetResult on its TaskCompletionSource, since it would execute the open's
-                    // continuation in our thread (the closing thread). Instead we schedule the completion
-                    // to run in the TP
-
-                    // We copy tcs2 and especially connector2 to avoid allocations caused by the closure, see
-                    // http://stackoverflow.com/questions/41507166/closure-heap-allocation-happening-at-start-of-method
-                    var tcs2 = tcs;
-                    var connector2 = connector;
-
-                    Task.Run(() =>
+                    if (!_waiting.TryDequeue(out var waitingOpenAttempt))
                     {
-                        if (!tcs2.TrySetResult(connector2))
+                        // _waitingCount has been increased, but there's nothing in the queue yet - someone is in the
+                        // process of enqueuing an open attempt. Wait and retry.
+                        Thread.Sleep(1);
+                        continue;
+                    }
+
+                    var tcs = waitingOpenAttempt.TaskCompletionSource;
+
+                    // We have a pending open attempt. "Complete" it, handing off the connector.
+                    if (waitingOpenAttempt.IsAsync)
+                    {
+                        // If the waiting open attempt is asynchronous (i.e. OpenAsync()), we can't simply
+                        // call SetResult on its TaskCompletionSource, since it would execute the open's
+                        // continuation in our thread (the closing thread). Instead we schedule the completion
+                        // to run in the TP
+
+                        // We copy tcs2 and especially connector2 to avoid allocations caused by the closure, see
+                        // http://stackoverflow.com/questions/41507166/closure-heap-allocation-happening-at-start-of-method
+                        var tcs2 = tcs;
+                        var connector2 = connector;
+
+                        Task.Run(() =>
                         {
-                            // Race condition: the waiter timed out between our IsCanceled check above and here
-                            // Recursively call Release again, this will dequeue another open attempt and retry.
-                            Debug.Assert(tcs2.Task.IsCanceled);
-                            Release(connector2);
-                        }
-                    });
-                }
-                else if (!tcs.TrySetResult(connector))
-                {
-                    // Race condition: the waiter timed out between our IsCanceled check above and here
-                    // Recursively call Release again, this will dequeue another open attempt and retry.
-                    Debug.Assert(tcs.Task.IsCanceled);
-                    continue;
-                }
+                            if (!tcs2.TrySetResult(connector2))
+                            {
+                                // Race condition: the waiter timed out between our IsCanceled check above and here
+                                // Recursively call Release again, this will dequeue another open attempt and retry.
+                                Debug.Assert(tcs2.Task.IsCanceled);
+                                Release(connector2);
+                            }
+                        });
+                    }
+                    else if (!tcs.TrySetResult(connector))  // Open attempt is sync
+                    {
+                        // Race condition: the waiter timed out between our IsCanceled check above and here
+                        // Recursively call Release again, this will dequeue another open attempt and retry.
+                        Debug.Assert(tcs.Task.IsCanceled);
+                        continue;
+                    }
 
-                return;
-            }
-
-            // There were no pending open attempts, simply place the connector back in the idle list
-            for (var i = 0; i < _idle.Length; i++)
-            {
-                if (Interlocked.CompareExchange(ref _idle[i], connector, null) == null)
-                {
-                    Counters.NumberOfFreeConnections.Increment();
-                    connector.ReleaseTimestamp = DateTime.UtcNow;
                     return;
                 }
-            }
 
-            // Should not be here
-            Log.Error("The idle list was full when releasing, there are more than MaxPoolSize connectors! Please file an issue.");
-            CloseConnector(connector);
+                // There were no waiting attempts. However, there's a race condition where a new waiting attempt
+                // may occur as we're putting our connector into the idle list. Decrement the busy
+                // count, while atomically make sure the waiting count isn't increased.
+                var newState = state;
+                newState.NumBusy--;
+                Debug.Assert(newState.NumBusy < _max, $"Busy count should be less than {_max}, but is {newState.NumBusy}");
+                Debug.Assert(newState.NumWaiting == 0, $"Waiting count should be 0, but is {newState.NumWaiting}");
+                if (Interlocked.CompareExchange(ref State.Both, newState.Both, state.Both) != state.Both)
+                {
+                    // Our attempt to decrement the busy count failed, either because a waiting attempt has been added
+                    // or busy has changed. Loop again and retry.
+                    continue;
+                }
+
+                // If we're here we successfully decreased the busy count and can put the connector back in the idle
+                // list. There were no pending open attempts, simply place the connector back in the idle list
+                for (var i = 0; i < _idle.Length; i++)
+                {
+                    if (Interlocked.CompareExchange(ref _idle[i], connector, null) == null)
+                    {
+                        Counters.NumberOfFreeConnections.Increment();
+                        connector.ReleaseTimestamp = DateTime.UtcNow;
+                        return;
+                    }
+                }
+
+                // Should not be here
+                Log.Error("The idle list was full when releasing, there are more than MaxPoolSize connectors! Please file an issue.");
+                CloseConnector(connector);
+            }
         }
 
         void CloseConnector(NpgsqlConnector connector)
@@ -465,7 +533,9 @@ namespace Npgsql
                 Log.Warn("Exception while closing outdated connector", e, connector.Id);
             }
 
-            Interlocked.Decrement(ref Total);
+            var total = Interlocked.Decrement(ref Total);
+            Debug.Assert(total >= 0);
+
             Counters.NumberOfPooledConnections.Decrement();
 
             while (_pruningTimer != null && Total <= _min)
