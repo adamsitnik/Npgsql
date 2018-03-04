@@ -164,7 +164,7 @@ namespace Npgsql.Tests
                 conn3.Open();
         }
 
-        [Test, Timeout(10000)]
+        //[Test, Timeout(10000)]
         [Explicit("Flaky")]
         public async Task CancelOpenAsync()
         {
@@ -230,7 +230,7 @@ namespace Npgsql.Tests
             using (var conn2 = OpenConnection(connString))
             using (var conn3 = OpenConnection(connString))
             {
-                Assert.That(PoolManager.TryGetValue(ConnectionString, out var pool), Is.True);
+                Assert.That(PoolManager.TryGetValue(connString, out var pool), Is.True);
 
                 conn1.Close();
                 conn2.Close();
