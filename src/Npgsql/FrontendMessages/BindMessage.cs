@@ -55,13 +55,11 @@ namespace Npgsql.FrontendMessages
         internal BindMessage Populate(List<NpgsqlParameter> inputParameters, string portal = "", string statement = "")
         {
             Debug.Assert(inputParameters != null && inputParameters.All(p => p.IsInputDirection));
-            Debug.Assert(portal != null);
-            Debug.Assert(statement != null);
 
             AllResultTypesAreUnknown = false;
             UnknownResultTypeList = null;
-            Portal = portal;
-            Statement = statement;
+            Portal = portal ?? string.Empty;
+            Statement = statement ?? string.Empty;
             InputParameters = inputParameters;
             return this;
         }

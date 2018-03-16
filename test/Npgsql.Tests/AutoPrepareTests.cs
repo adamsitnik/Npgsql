@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using NpgsqlTypes;
 using NUnit.Framework;
 
@@ -38,10 +35,13 @@ namespace Npgsql.Tests
                     Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
                 }
 
+                Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
+
                 using (var cmd = new NpgsqlCommand("SELECT 1", conn))
                 {
                     cmd.ExecuteScalar();
                     Assert.That(cmd.IsPrepared, Is.True);
+                    Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
                 }
                 Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
                 conn.UnprepareAll();
@@ -50,6 +50,60 @@ namespace Npgsql.Tests
 
         [Test, Description("Passes the maximum limit for autoprepared statements, recycling the least-recently used one")]
         public void Recycle()
+        {
+            var csb = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                AutoPrepareMinUsages = 2,
+                MaxAutoPrepare = 2
+            };
+
+            using (var conn = OpenConnection(csb))
+            using (var checkCmd = new NpgsqlCommand(CountPreparedStatements, conn))
+            {
+                checkCmd.Prepare();
+
+                Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(0));
+
+                using (var cmd1 = new NpgsqlCommand("SELECT 1", conn))
+                {
+                    cmd1.ExecuteNonQuery();
+                    cmd1.ExecuteNonQuery();
+                    Assert.That(cmd1.IsPrepared, Is.True);
+                    Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
+                }
+
+                //Thread.Sleep(10);
+
+                using (var cmd2 = new NpgsqlCommand("SELECT 2", conn))
+                {
+                    cmd2.ExecuteNonQuery();
+                    cmd2.ExecuteNonQuery();
+                    Assert.That(cmd2.IsPrepared, Is.True);
+                    Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(2));
+                }
+
+                // Use cmd1 to make cmd2 the lru
+                //Thread.Sleep(1);
+                using (var cmd1 = new NpgsqlCommand("SELECT 1", conn))
+                    cmd1.ExecuteNonQuery();
+
+                // Cause another statement to be autoprepared. This should eject cmd2.
+                conn.ExecuteNonQuery("SELECT 3"); conn.ExecuteNonQuery("SELECT 3");
+                Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(2));
+
+                using (var cmd2 = new NpgsqlCommand("SELECT 2", conn))
+                {
+                    cmd2.ExecuteNonQuery();
+                    Assert.That(cmd2.IsPrepared, Is.False);
+                }
+
+                Assert.That(GetPreparedStatementNames(conn), Is.EqualTo(new List<string> {"SELECT 1", "SELECT 3"}));
+                conn.UnprepareAll();
+            }
+        }
+
+        [Test]
+        public void TooManyCommands()
         {
             var csb = new NpgsqlConnectionStringBuilder(ConnectionString)
             {
@@ -155,12 +209,12 @@ namespace Npgsql.Tests
                 cmd1.ExecuteNonQuery(); cmd1.ExecuteNonQuery();
                 // cmd1 is now autoprepared
                 Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
-                Assert.That(conn.Connector.PreparedStatementManager.NumPrepared, Is.EqualTo(2));
+                Assert.That(conn.Connector.CachedCommandManager.NumPrepared, Is.EqualTo(2));
 
                 // Promote (replace) the autoprepared statement with an explicit one.
                 cmd2.Prepare();
                 Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
-                Assert.That(conn.Connector.PreparedStatementManager.NumPrepared, Is.EqualTo(2));
+                Assert.That(conn.Connector.CachedCommandManager.NumPrepared, Is.EqualTo(2));
 
                 // cmd1's statement is no longer valid (has been closed), make sure it still works (will run unprepared)
                 cmd2.ExecuteScalar();
@@ -181,7 +235,7 @@ namespace Npgsql.Tests
             {
                 cmd.Connection = conn;
 
-                for (var i = 0; i < PreparedStatementManager.CandidateCount; i++)
+                for (var i = 0; i < CachedCommandManager.CandidateCount; i++)
                 {
                     cmd.CommandText = $"SELECT {i}";
                     cmd.ExecuteNonQuery();
@@ -194,7 +248,7 @@ namespace Npgsql.Tests
                 cmd.ExecuteNonQuery(); cmd.ExecuteNonQuery();
                 // We now have a single statement that has been used twice.
 
-                for (var i = PreparedStatementManager.CandidateCount; i < PreparedStatementManager.CandidateCount * 2; i++)
+                for (var i = CachedCommandManager.CandidateCount; i < CachedCommandManager.CandidateCount * 2; i++)
                 {
                     cmd.CommandText = $"SELECT {i}";
                     cmd.ExecuteNonQuery();
@@ -334,7 +388,7 @@ namespace Npgsql.Tests
                 cmd.Parameters.AddWithValue("@p", NpgsqlDbType.Integer, answer);
                 cmd.ExecuteNonQuery(); cmd.ExecuteNonQuery(); // cmd1 is now autoprepared
                 Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(1));
-                Assert.That(conn.Connector.PreparedStatementManager.NumPrepared, Is.EqualTo(2));
+                Assert.That(conn.Connector.CachedCommandManager.NumPrepared, Is.EqualTo(2));
 
                 // Derive parameters for the already autoprepared statement
                 NpgsqlCommandBuilder.DeriveParameters(cmd);
@@ -343,7 +397,7 @@ namespace Npgsql.Tests
 
                 // DeriveParameters should have silently unprepared the autoprepared statements
                 Assert.That(checkCmd.ExecuteScalar(), Is.EqualTo(0));
-                Assert.That(conn.Connector.PreparedStatementManager.NumPrepared, Is.EqualTo(1));
+                Assert.That(conn.Connector.CachedCommandManager.NumPrepared, Is.EqualTo(1));
 
                 cmd.Parameters["@p"].Value = answer;
                 Assert.That(cmd.ExecuteScalar(), Is.EqualTo(answer));
@@ -357,6 +411,16 @@ namespace Npgsql.Tests
 SELECT COUNT(*) FROM pg_prepared_statements
     WHERE statement NOT LIKE '%pg_prepared_statements%'
     AND statement NOT LIKE '%pg_type%'";
+
+        List<string> GetPreparedStatementNames(NpgsqlConnection conn)
+        {
+            var list = new List<string>();
+            using (var cmd = new NpgsqlCommand("SELECT statement FROM pg_prepared_statements WHERE statement NOT LIKE '%COUNT%' ORDER BY statement", conn))
+            using (var reader = cmd.ExecuteReader())
+                while (reader.Read())
+                    list.Add(reader.GetString(0));
+            return list;
+        }
 
         void DumpPreparedStatements(NpgsqlConnection conn)
         {

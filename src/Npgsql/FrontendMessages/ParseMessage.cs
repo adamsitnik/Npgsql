@@ -72,7 +72,7 @@ namespace Npgsql.FrontendMessages
         {
             ParameterTypeOIDs.Clear();
             Query = sql;
-            Statement = statementName;
+            Statement = statementName ?? string.Empty;
             return this;
         }
 

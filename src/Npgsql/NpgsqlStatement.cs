@@ -49,62 +49,39 @@ namespace Npgsql
         public List<NpgsqlParameter> InputParameters { get; } = new List<NpgsqlParameter>();
 
         /// <summary>
-        /// The RowDescription message for this query. If null, the query does not return rows (e.g. INSERT)
+        /// The PostgreSQL statement name. If null, this statement will run unprepared.
         /// </summary>
-        [CanBeNull]
-        internal RowDescriptionMessage Description
-        {
-            get { return PreparedStatement == null ? _description : PreparedStatement.Description; }
-            set
-            {
-                if (PreparedStatement == null)
-                    _description = value;
-                else
-                    PreparedStatement.Description = value;
-            }
-        }
-
-        [CanBeNull]
-        RowDescriptionMessage _description;
+        internal string Name;
 
         /// <summary>
-        /// If this statement has been automatically prepared, references the <see cref="PreparedStatement"/>.
-        /// Null otherwise.
+        /// How many instances of <see cref="CachedCommand"/> are referencing this prepared statement.
         /// </summary>
-        [CanBeNull]
-        internal PreparedStatement PreparedStatement
-        {
-            get
-            {
-                if (_preparedStatement != null && _preparedStatement.State == PreparedState.Unprepared)
-                    _preparedStatement = null;
-                return _preparedStatement;
-            }
-            set => _preparedStatement = value;
-        }
+        internal int RefCount;
 
         [CanBeNull]
-        PreparedStatement _preparedStatement;
+        internal RowDescriptionMessage Description;
+
+        internal PreparedState State { get; set; }
+
+        internal bool IsPrepared => State == PreparedState.Prepared;
 
         /// <summary>
-        /// Holds the server-side (prepared) statement name. Empty string for non-prepared statements.
+        /// If we've reached the limit of prepared statements, this references the LRU command that will be unprepared
+        /// to make room for us. Note that this command may reference several other statements, no necessarily one.
         /// </summary>
-        internal string StatementName => PreparedStatement?.Name ?? "";
-
-        /// <summary>
-        /// Whether this statement has already been prepared (including automatic preparation).
-        /// </summary>
-        internal bool IsPrepared => PreparedStatement?.IsPrepared == true;
+        [CanBeNull]
+        internal CachedCommand CommandBeingReplaced;
 
         internal void Reset()
         {
             SQL = string.Empty;
+            Name = null;
+            State = PreparedState.NotPrepared;
             StatementType = StatementType.Select;
-            _description = null;
+            Description = null;
             Rows = 0;
             OID = 0;
             InputParameters.Clear();
-            PreparedStatement = null;
         }
 
         internal void ApplyCommandComplete(CommandCompleteMessage msg)
@@ -118,5 +95,40 @@ namespace Npgsql
         /// Returns the SQL text of the statement.
         /// </summary>
         public override string ToString() => SQL ?? "<none>";
+    }
+
+    enum PreparedState
+    {
+        /// <summary>
+        /// The statement hasn't been prepared yet, nor is it in the process of being prepared.
+        /// </summary>
+        NotPrepared,
+
+        /// <summary>
+        /// The statement has been selected for preparation, but the preparation hasn't started yet.
+        /// This is a temporary state that only occurs during preparation.
+        /// Specifically, it means that a Parse message for the statement has already been written to the write buffer.
+        /// </summary>
+        ToBePrepared,
+
+        /// <summary>
+        /// The statement is in the process of being prepared. This is a temporary state that only occurs during
+        /// preparation. Specifically, it means that a Parse message for the statement has already been written
+        /// to the write buffer, but confirmation of the preparation (ParseComplete) hasn't yet been received from
+        /// the server.
+        /// </summary>
+        BeingPrepared,
+
+        /// <summary>
+        /// The statement has been fully prepared and can be executed.
+        /// </summary>
+        Prepared,
+
+        /// <summary>
+        /// The statement is in the process of being unprepared. This is a temporary state that only occurs during
+        /// unpreparation. Specifically, it means that a Close message for the statement has already been written
+        /// to the write buffer.
+        /// </summary>
+        BeingUnprepared
     }
 }

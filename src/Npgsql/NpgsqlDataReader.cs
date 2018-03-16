@@ -381,17 +381,15 @@ namespace Npgsql
                 }
                 else  // Non-prepared flow
                 {
-                    var pStatement = statement.PreparedStatement;
-                    if (pStatement != null)
+                    if (statement.CommandBeingReplaced != null)
                     {
-                        Debug.Assert(!pStatement.IsPrepared);
-                        Debug.Assert(pStatement.Description == null);
-                        if (pStatement.StatementBeingReplaced != null)
-                        {
-                            Expect<CloseCompletedMessage>(await Connector.ReadMessage(async));
-                            pStatement.StatementBeingReplaced.CompleteUnprepare();
-                            pStatement.StatementBeingReplaced = null;
-                        }
+                        Debug.Assert(!statement.IsPrepared);
+                        foreach (var statementToClose in statement.CommandBeingReplaced.Statements)
+                            if (statementToClose.RefCount > 0)
+                                Expect<CloseCompletedMessage>(await Connector.ReadMessage(async));
+
+                        //statement.StatementBeingReplaced.CompleteUnprepare();
+                        statement.CommandBeingReplaced = null;
                     }
 
                     Expect<ParseCompleteMessage>(await Connector.ReadMessage(async));
@@ -410,10 +408,10 @@ namespace Npgsql
                         throw Connector.UnexpectedMessageReceived(msg.Code);
                     }
 
-                    if (pStatement != null)
+                    if (statement.State == PreparedState.BeingPrepared)
                     {
-                        Debug.Assert(!pStatement.IsPrepared);
-                        pStatement.CompletePrepare();
+                        statement.State = PreparedState.Prepared;
+                        //pStatement.CompletePrepare();
                     }
                 }
 

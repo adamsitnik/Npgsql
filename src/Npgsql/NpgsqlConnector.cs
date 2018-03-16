@@ -150,7 +150,10 @@ namespace Npgsql
         [CanBeNull]
         internal NpgsqlDataReader CurrentReader;
 
-        internal PreparedStatementManager PreparedStatementManager;
+        internal CachedCommandManager CachedCommandManager;
+
+        internal string NextExplicitPreparedStatementName() => "_p" + (++_explicitPreparedStatementIndex);
+        ulong _explicitPreparedStatementIndex;
 
         /// <summary>
         /// If the connector is currently in COPY mode, holds a reference to the importer/exporter object.
@@ -307,8 +310,7 @@ namespace Npgsql
             DefaultDataReader = new NpgsqlDefaultDataReader(this);
             SequentialDataReader = new NpgsqlSequentialDataReader(this);
 
-            // TODO: Not just for automatic preparation anymore...
-            PreparedStatementManager = new PreparedStatementManager(this);
+            CachedCommandManager = new CachedCommandManager(this);
         }
 
         #endregion
@@ -1558,7 +1560,7 @@ namespace Npgsql
 
             if (!Settings.NoResetOnClose && DatabaseInfo.SupportsDiscard)
             {
-                if (PreparedStatementManager.NumPrepared > 0)
+                if (CachedCommandManager.NumPrepared > 0)
                 {
                     // We have prepared statements, so we can't reset the connection state with DISCARD ALL
                     // Note: the send buffer has been cleared above, and we assume all this will fit in it.
@@ -1577,7 +1579,7 @@ namespace Npgsql
         internal void UnprepareAll()
         {
             ExecuteInternalCommand("DEALLOCATE ALL");
-            PreparedStatementManager.ClearAll();
+            CachedCommandManager.ClearAll();
         }
 
         #endregion Close / Reset
