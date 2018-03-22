@@ -82,7 +82,7 @@ namespace Npgsql
         internal NpgsqlConnectionStringBuilder Settings { get; private set; }
 
         [CanBeNull]
-        ConnectorPool _pool;
+        Pool _pool;
 
         bool _wasBroken;
 
@@ -203,7 +203,7 @@ namespace Npgsql
             // Really unseen, need to create a new pool
             // The canonical pool is the 'base' pool so we need to set that up first. If someone beats us to it use what they put.
             // The connection string pool can either be added here or above, if it's added above we should just use that.
-            var newPool = new ConnectorPool(Settings, canonical);
+            var newPool = new Pool(Settings, canonical);
             _pool = PoolManager.GetOrAdd(canonical, newPool);
 
             if (_pool == newPool)

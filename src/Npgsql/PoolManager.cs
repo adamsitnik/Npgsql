@@ -39,10 +39,10 @@ namespace Npgsql
     {
         internal const int InitialPoolsSize = 10;
 
-        static (string Key, ConnectorPool Pool)[] _pools = new (string, ConnectorPool)[InitialPoolsSize];
+        static (string Key, Pool Pool)[] _pools = new (string, Pool)[InitialPoolsSize];
         static int _nextSlot;
 
-        internal static bool TryGetValue(string key, out ConnectorPool pool)
+        internal static bool TryGetValue(string key, out Pool pool)
         {
             // Note that pools never get removed. _pools is strictly append-only.
             var pools = _pools;
@@ -79,7 +79,7 @@ namespace Npgsql
             return false;
         }
 
-        internal static ConnectorPool GetOrAdd(string key, ConnectorPool pool)
+        internal static Pool GetOrAdd(string key, Pool pool)
         {
             lock (_pools)
             {
@@ -89,7 +89,7 @@ namespace Npgsql
                 // May need to grow the array.
                 if (_nextSlot == _pools.Length)
                 {
-                    var newPools = new (string, ConnectorPool)[_pools.Length * 2];
+                    var newPools = new (string, Pool)[_pools.Length * 2];
                     Array.Copy(_pools, newPools, _pools.Length);
                     Interlocked.Exchange(ref _pools, newPools);
                 }
@@ -136,7 +136,7 @@ namespace Npgsql
             lock (_pools)
             {
                 ClearAll();
-                _pools = new (string, ConnectorPool)[InitialPoolsSize];
+                _pools = new (string, Pool)[InitialPoolsSize];
                 _nextSlot = 0;
             }
         }

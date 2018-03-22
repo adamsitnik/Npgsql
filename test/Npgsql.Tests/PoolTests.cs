@@ -63,7 +63,7 @@ namespace Npgsql.Tests
         public void MinPoolSizeLargerThanPoolSizeLimit()
         {
             var csb = new NpgsqlConnectionStringBuilder(ConnectionString);
-            Assert.That(() => csb.MinPoolSize = ConnectorPool.PoolSizeLimit + 1, Throws.Exception.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => csb.MinPoolSize = Pool.PoolSizeLimit + 1, Throws.Exception.TypeOf<ArgumentOutOfRangeException>());
         }
 
         [Test]
@@ -306,7 +306,7 @@ namespace Npgsql.Tests
         [Test]
         public void ClearWithBusy()
         {
-            ConnectorPool pool;
+            Pool pool;
             using (var conn = OpenConnection())
             {
                 NpgsqlConnection.ClearPool(conn);
@@ -328,7 +328,7 @@ namespace Npgsql.Tests
                 NpgsqlConnection.ClearPool(conn);
         }
 
-        void AssertPoolState(ConnectorPool pool, int idle, int busy, int waiting=0)
+        void AssertPoolState(Pool pool, int idle, int busy, int waiting=0)
         {
             var state = pool.State;
             Assert.That(state.Idle, Is.EqualTo(idle), $"Idle should be {idle} but is {state.Idle}");

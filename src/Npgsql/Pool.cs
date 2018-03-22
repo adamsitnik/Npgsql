@@ -31,6 +31,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Transactions;
 using JetBrains.Annotations;
+using Npgsql.BackendMessages;
 using Npgsql.Logging;
 
 namespace Npgsql
@@ -40,7 +41,8 @@ namespace Npgsql
     /// block until someone releases. Implementation is completely lock-free to avoid contention, and ensure FIFO
     /// for open attempts waiting (because the pool is at capacity).
     /// </summary>
-    sealed class ConnectorPool : IDisposable
+    sealed class Pool<T> : IDisposable
+        where T : class, IDisposable
     {
         #region Implementation notes
 
@@ -72,9 +74,9 @@ namespace Npgsql
         readonly int _min;
 
         [ItemCanBeNull]
-        readonly NpgsqlConnector[] _idle;
+        readonly ItemWrapper[] _idle;
 
-        readonly ConcurrentQueue<(TaskCompletionSource<NpgsqlConnector> TaskCompletionSource, bool IsAsync)> _waiting;
+        readonly ConcurrentQueue<(TaskCompletionSource<T> TaskCompletionSource, bool IsAsync)> _waiting;
 
         [StructLayout(LayoutKind.Explicit)]
         internal struct PoolState
@@ -92,6 +94,12 @@ namespace Npgsql
         }
 
         internal PoolState State;
+
+        struct ItemWrapper
+        {
+            internal T Item;
+            internal DateTime ReleaseTimestamp;
+        }
 
         /// <summary>
         /// Incremented every time this pool is cleared via <see cref="NpgsqlConnection.ClearPool"/> or
@@ -113,7 +121,7 @@ namespace Npgsql
 
         #endregion
 
-        internal ConnectorPool(NpgsqlConnectionStringBuilder settings, string connString)
+        internal Pool(NpgsqlConnectionStringBuilder settings, string connString)
         {
             if (settings.MaxPoolSize < settings.MinPoolSize)
                 throw new ArgumentException($"Connection can't have MaxPoolSize {settings.MaxPoolSize} under MinPoolSize {settings.MinPoolSize}");
@@ -128,14 +136,14 @@ namespace Npgsql
                 : settings.ToStringWithoutPassword();
 
             _pruningInterval = TimeSpan.FromSeconds(Settings.ConnectionPruningInterval);
-            _idle = new NpgsqlConnector[_max];
+            _idle = new ItemWrapper[_max];
             _waiting = new ConcurrentQueue<(TaskCompletionSource<NpgsqlConnector> TaskCompletionSource, bool IsAsync)>();
         }
 
         // This path exists so that the caller (NpgsqlConnection.Open()) can itself implement a fast path, avoiding
         // being an async method.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal bool TryAllocateFast(out NpgsqlConnector connector)
+        internal bool TryAllocateFast(out T item)
         {
             // We start scanning for an idle connector in "random" places in the array, to avoid
             // too much interlocked operations "contention" at the beginning.
@@ -153,18 +161,19 @@ namespace Npgsql
                     var index = (start + i) % _max;
 
                     // First check without an Interlocked operation, it's faster
-                    if (_idle[index] == null)
+                    if (_idle[index].Item == null)
                         continue;
 
-                    // If we saw a connector in this slot, atomically exchange it with a null.
-                    // Either we get a connector out which we can use, or we get null because
+                    // If we saw an item in this slot, atomically exchange it with a null.
+                    // Either we get a item out which we can use, or we get null because
                     // someone has taken it in the meanwhile. Either way put a null in its place.
-                    connector = Interlocked.Exchange(ref _idle[index], null);
-                    if (connector == null)
+                    item = Interlocked.Exchange(ref _idle[index].Item, null);
+                    if (item == null)
                         continue;
 
                     Counters.NumberOfFreeConnections.Decrement();
 
+                    /* TODO: Move this outside
                     // An connector could be broken because of a keepalive that occurred while it was
                     // idling in the pool
                     // TODO: Consider removing the pool from the keepalive code. The following branch is simply irrelevant
@@ -173,7 +182,7 @@ namespace Npgsql
                     {
                         CloseConnector(connector, true);
                         continue;
-                    }
+                    }*/
 
                     // We successfully extracted an idle connector, update state
                     Counters.SoftConnectsPerSecond.Increment();
@@ -191,13 +200,13 @@ namespace Npgsql
                 }
             }
 
-            connector = null;
+            item = null;
             return false;
         }
 
-        internal async Task<NpgsqlConnector> AllocateLong(NpgsqlConnection conn, NpgsqlTimeout timeout, bool async, CancellationToken cancellationToken)
+        internal async Task<T> AllocateLong(NpgsqlConnection conn, NpgsqlTimeout timeout, bool async, CancellationToken cancellationToken)
         {
-            NpgsqlConnector connector;
+            T connector;
 
             // No idle connector was found in the pool.
             // We now loop until one of three things happen:
@@ -265,7 +274,7 @@ namespace Npgsql
                     {
                         // Enqueue an open attempt into the waiting queue so that the next release attempt will unblock us.
                         // TODO: Async cancellation
-                        var tcs = new TaskCompletionSource<NpgsqlConnector>();
+                        var tcs = new TaskCompletionSource<T>();
                         _waiting.Enqueue((tcs, async));
 
                         try
@@ -337,11 +346,12 @@ namespace Npgsql
             // Cannot be here
         }
 
-        internal void Release(NpgsqlConnector connector)
+        internal void Release(T item)
         {
             Counters.SoftDisconnectsPerSecond.Increment();
             Counters.NumberOfActiveConnections.Decrement();
 
+            /* TODO: Move out of the ool
             // If Clear/ClearAll has been been called since this connector was first opened,
             // throw it away. The same if it's broken (in which case CloseConnector is only
             // used to update state/perf counter).
@@ -352,6 +362,7 @@ namespace Npgsql
             }
 
             connector.Reset();
+            */
 
             while (true)
             {
@@ -383,7 +394,7 @@ namespace Npgsql
                         // We copy tcs2 and especially connector2 to avoid allocations caused by the closure, see
                         // http://stackoverflow.com/questions/41507166/closure-heap-allocation-happening-at-start-of-method
                         var tcs2 = tcs;
-                        var connector2 = connector;
+                        var connector2 = item;
 
                         Task.Run(() =>
                         {
@@ -397,7 +408,7 @@ namespace Npgsql
                             }
                         });
                     }
-                    else if (!tcs.TrySetResult(connector))  // Open attempt is sync
+                    else if (!tcs.TrySetResult(item))  // Open attempt is sync
                     {
                         // If the open attempt timed out, the Task's state will be set to Canceled and our
                         // TrySetResult fails. Try again.
@@ -427,25 +438,25 @@ namespace Npgsql
                 // list (there were no pending open attempts).
                 for (var i = 0; i < _idle.Length; i++)
                 {
-                    if (Interlocked.CompareExchange(ref _idle[i], connector, null) == null)
+                    if (Interlocked.CompareExchange(ref _idle[i].Item, item, null) == null)
                     {
                         Counters.NumberOfFreeConnections.Increment();
-                        connector.ReleaseTimestamp = DateTime.UtcNow;
+                        _idle[i].ReleaseTimestamp = DateTime.Now;
                         return;
                     }
                 }
 
                 // Should not be here
                 Log.Error("The idle list was full when releasing, there are more than MaxPoolSize connectors! Please file an issue.");
-                CloseConnector(connector, false);
+                CloseConnector(item, false);
             }
         }
 
-        void CloseConnector(NpgsqlConnector connector, bool wasIdle)
+        void CloseConnector(T item, bool wasIdle)
         {
             try
             {
-                connector.Close();
+                item.Dispose();
 
                 while (true)
                 {
@@ -462,7 +473,7 @@ namespace Npgsql
             }
             catch (Exception e)
             {
-                Log.Warn("Exception while closing outdated connector", e, connector.Id);
+                Log.Warn("Exception while closing outdated connector", e);
             }
 
             Counters.NumberOfPooledConnections.Decrement();
@@ -488,11 +499,13 @@ namespace Npgsql
                 if (State.Total <= _min)
                     return;
 
-                var connector = _idle[i];
-                if (connector == null || (now - connector.ReleaseTimestamp).TotalSeconds < idleLifetime)
+                // TODO: NONONO tearing can occur on the following line
+                var wrapper = _idle[i];
+                var item = wrapper.Item;
+                if (item == null || (now - wrapper.ReleaseTimestamp).TotalSeconds < idleLifetime)
                     continue;
-                if (Interlocked.CompareExchange(ref _idle[i], null, connector) == connector)
-                    CloseConnector(connector, true);
+                if (Interlocked.CompareExchange(ref _idle[i].Item, null, wrapper.Item) == wrapper.Item)
+                    CloseConnector(wrapper, true);
             }
         }
 
