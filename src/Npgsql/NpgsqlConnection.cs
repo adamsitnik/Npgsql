@@ -171,7 +171,7 @@ namespace Npgsql
                 Settings = _pool.Settings;  // Great, we already have a pool
                 return;
             }
-                
+
             // Connection string hasn't been seen before. Parse it.
             Settings = new NpgsqlConnectionStringBuilder(_connectionString);
 
@@ -186,7 +186,7 @@ namespace Npgsql
             {
                 return;
             }
-            
+
             // Connstring may be equivalent to one that has already been seen though (e.g. different
             // ordering). Have NpgsqlConnectionStringBuilder produce a canonical string representation
             // and recheck.
@@ -199,7 +199,7 @@ namespace Npgsql
                 _pool = PoolManager.GetOrAdd(_connectionString, _pool);
                 return;
             }
-                
+
             // Really unseen, need to create a new pool
             // The canonical pool is the 'base' pool so we need to set that up first. If someone beats us to it use what they put.
             // The connection string pool can either be added here or above, if it's added above we should just use that.
@@ -225,9 +225,10 @@ namespace Npgsql
 
             Log.Trace("Opening connection...");
 
-            if (_pool == null || Settings.Enlist || !_pool.TryAllocateFast(this, out Connector))
+            if (_pool == null || Settings.Enlist || !_pool.TryAllocateFast(out Connector))
                 return OpenLong(async, cancellationToken);
 
+            Connector.Connection = this;
             _userFacingConnectionString = _pool.UserFacingConnectionString;
 
             Counters.SoftConnectsPerSecond.Increment();
@@ -289,12 +290,14 @@ namespace Npgsql
                             // If Enlist is true, we skipped the fast path above, try it here first,
                             // before going to the long path.
                             // TODO: Maybe find a more elegant way to factor this code...
-                            if (!_pool.TryAllocateFast(this, out Connector))
+                            if (!_pool.TryAllocateFast(out Connector))
                                 Connector = await _pool.AllocateLong(this, timeout, async, cancellationToken);
                         }
                     }
                     else  // No enlist
                         Connector = await _pool.AllocateLong(this, timeout, async, cancellationToken);
+
+                    Connector.Connection = this;
 
                     // Since this pooled connector was opened, global mappings may have
                     // changed. Bring this up to date if needed.

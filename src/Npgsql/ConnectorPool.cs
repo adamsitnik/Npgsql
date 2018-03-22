@@ -135,7 +135,7 @@ namespace Npgsql
         // This path exists so that the caller (NpgsqlConnection.Open()) can itself implement a fast path, avoiding
         // being an async method.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal bool TryAllocateFast(NpgsqlConnection conn, out NpgsqlConnector connector)
+        internal bool TryAllocateFast(out NpgsqlConnector connector)
         {
             // We start scanning for an idle connector in "random" places in the array, to avoid
             // too much interlocked operations "contention" at the beginning.
@@ -174,8 +174,6 @@ namespace Npgsql
                         CloseConnector(connector, true);
                         continue;
                     }
-
-                    connector.Connection = conn;
 
                     // We successfully extracted an idle connector, update state
                     Counters.SoftConnectsPerSecond.Increment();
@@ -309,12 +307,10 @@ namespace Npgsql
                             // and we're good to go.
                         }
 
-                        Debug.Assert(tcs.Task.IsCompleted);
-                        connector = tcs.Task.Result;
                         // Note that we don't update counters or any state since the connector is being
                         // handed off from one open connection to another.
-                        connector.Connection = conn;
-                        return connector;
+                        Debug.Assert(tcs.Task.IsCompleted);
+                        return tcs.Task.Result;
                     }
                     finally
                     {
@@ -334,7 +330,7 @@ namespace Npgsql
                 // We didn't create a new connector or start waiting, which means there's a new idle connector, try
                 // getting it
                 Debug.Assert(state.Idle > 0);
-                if (TryAllocateFast(conn, out connector))
+                if (TryAllocateFast(out connector))
                     return connector;
             }
 
