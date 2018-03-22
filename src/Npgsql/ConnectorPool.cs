@@ -132,11 +132,11 @@ namespace Npgsql
             _waiting = new ConcurrentQueue<(TaskCompletionSource<NpgsqlConnector> TaskCompletionSource, bool IsAsync)>();
         }
 
+        // This path exists so that the caller (NpgsqlConnection.Open()) can itself implement a fast path, avoiding
+        // being an async method.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool TryAllocateFast(NpgsqlConnection conn, out NpgsqlConnector connector)
         {
-            Counters.SoftConnectsPerSecond.Increment();
-
             // We start scanning for an idle connector in "random" places in the array, to avoid
             // too much interlocked operations "contention" at the beginning.
             var start = Thread.CurrentThread.ManagedThreadId % _max;
@@ -178,6 +178,7 @@ namespace Npgsql
                     connector.Connection = conn;
 
                     // We successfully extracted an idle connector, update state
+                    Counters.SoftConnectsPerSecond.Increment();
                     Counters.NumberOfActiveConnections.Increment();
                     while (true)
                     {
