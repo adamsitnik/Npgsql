@@ -29,6 +29,7 @@ using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using NpgsqlTypes;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.InternalTypesHandlers
 {
     [TypeMapping("tid", NpgsqlDbType.Tid, typeof(NpgsqlTid))]
@@ -62,3 +63,4 @@ namespace Npgsql.TypeHandlers.InternalTypesHandlers
         #endregion Write
     }
 }
+#endif

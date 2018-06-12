@@ -37,13 +37,13 @@ namespace Npgsql.TypeHandlers
     [TypeMapping("boolean", NpgsqlDbType.Boolean, DbType.Boolean, typeof(bool))]
     class BoolHandler : NpgsqlSimpleTypeHandler<bool>
     {
-        public override bool Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
-            => buf.ReadByte() != 0;
+        public override bool Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
+            => buf[0] != 0;
 
         public override int ValidateAndGetLength(bool value, NpgsqlParameter parameter)
             => 1;
 
-        public override void Write(bool value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteByte(value ? (byte)1 : (byte)0);
+        public override void Write(bool value, Span<byte> buf, NpgsqlParameter parameter)
+            => buf[0] = value ? (byte)1 : (byte)0;
     }
 }

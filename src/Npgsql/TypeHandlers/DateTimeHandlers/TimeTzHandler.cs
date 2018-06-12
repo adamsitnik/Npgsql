@@ -29,6 +29,7 @@ using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using NpgsqlTypes;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("time with time zone", NpgsqlDbType.TimeTz)]
@@ -130,3 +131,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         #endregion Write
     }
 }
+#endif

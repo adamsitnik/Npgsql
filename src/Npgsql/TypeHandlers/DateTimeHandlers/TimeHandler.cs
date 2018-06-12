@@ -29,6 +29,7 @@ using Npgsql.PostgresTypes;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("time", NpgsqlDbType.Time, new[] { DbType.Time })]
@@ -77,3 +78,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         }
     }
 }
+#endif

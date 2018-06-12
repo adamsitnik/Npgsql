@@ -28,6 +28,7 @@ using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using NpgsqlTypes;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("interval", NpgsqlDbType.Interval, new[] { typeof(TimeSpan), typeof(NpgsqlTimeSpan) })]
@@ -98,3 +99,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
             => Write(value, buf, parameter);
     }
 }
+#endif

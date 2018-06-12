@@ -29,6 +29,7 @@ using JetBrains.Annotations;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("timestamp with time zone", NpgsqlDbType.TimestampTz, DbType.DateTimeOffset, typeof(DateTimeOffset))]
@@ -136,3 +137,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         #endregion Write
     }
 }
+#endif

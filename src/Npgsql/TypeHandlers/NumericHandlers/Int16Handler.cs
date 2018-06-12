@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using Npgsql.BackendMessages;
 using NpgsqlTypes;
 using System.Data;
@@ -43,29 +44,29 @@ namespace Npgsql.TypeHandlers.NumericHandlers
     {
         #region Read
 
-        public override short Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
-            => buf.ReadInt16();
+        public override short Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
-        byte INpgsqlSimpleTypeHandler<byte>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => checked((byte)Read(buf, len, fieldDescription));
+        byte INpgsqlSimpleTypeHandler<byte>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => checked((byte)BinaryPrimitives.ReadInt16BigEndian(buf));
 
-        sbyte INpgsqlSimpleTypeHandler<sbyte>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => checked((sbyte)Read(buf, len, fieldDescription));
+        sbyte INpgsqlSimpleTypeHandler<sbyte>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => checked((sbyte)BinaryPrimitives.ReadInt16BigEndian(buf));
 
-        int INpgsqlSimpleTypeHandler<int>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => Read(buf, len, fieldDescription);
+        int INpgsqlSimpleTypeHandler<int>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
-        long INpgsqlSimpleTypeHandler<long>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => Read(buf, len, fieldDescription);
+        long INpgsqlSimpleTypeHandler<long>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
-        float INpgsqlSimpleTypeHandler<float>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => Read(buf, len, fieldDescription);
+        float INpgsqlSimpleTypeHandler<float>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
-        double INpgsqlSimpleTypeHandler<double>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => Read(buf, len, fieldDescription);
+        double INpgsqlSimpleTypeHandler<double>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
-        decimal INpgsqlSimpleTypeHandler<decimal>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => Read(buf, len, fieldDescription);
+        decimal INpgsqlSimpleTypeHandler<decimal>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => BinaryPrimitives.ReadInt16BigEndian(buf);
 
         #endregion Read
 
@@ -80,22 +81,22 @@ namespace Npgsql.TypeHandlers.NumericHandlers
         public int ValidateAndGetLength(double value, NpgsqlParameter parameter)         => 2;
         public int ValidateAndGetLength(decimal value, NpgsqlParameter parameter)        => 2;
 
-        public override void Write(short value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(value);
-        public void Write(int value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(checked((short)value));
-        public void Write(long value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(checked((short)value));
-        public void Write(byte value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(value);
-        public void Write(sbyte value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(value);
-        public void Write(decimal value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16((short)value);
-        public void Write(double value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(checked((short)value));
-        public void Write(float value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteInt16(checked((short)value));
+        public override void Write(short value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, value);
+        public void Write(int value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, checked((short)value));
+        public void Write(long value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, checked((short)value));
+        public void Write(byte value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, value);
+        public void Write(sbyte value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, value);
+        public void Write(decimal value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, (short)value);
+        public void Write(double value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, checked((short)value));
+        public void Write(float value, Span<byte> buf, NpgsqlParameter parameter)
+            => BinaryPrimitives.WriteInt16BigEndian(buf, checked((short)value));
 
         #endregion Write
     }

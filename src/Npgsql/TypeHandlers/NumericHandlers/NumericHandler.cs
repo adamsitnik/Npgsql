@@ -31,6 +31,8 @@ using System.Data;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+#if SPAN
+
 namespace Npgsql.TypeHandlers.NumericHandlers
 {
     [StructLayout(LayoutKind.Explicit)]
@@ -341,7 +343,7 @@ namespace Npgsql.TypeHandlers.NumericHandlers
                         goto WriteGroups;
                     }
                 }
-                
+
                 while ((remainder = DecimalRaw.Divide(ref raw, MaxGroupSize)) == 0)
                     weight++;
 
@@ -382,3 +384,4 @@ namespace Npgsql.TypeHandlers.NumericHandlers
         #endregion Write
     }
 }
+#endif

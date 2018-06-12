@@ -28,6 +28,7 @@ using JetBrains.Annotations;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers
 {
     /// <summary>
@@ -85,3 +86,4 @@ namespace Npgsql.TypeHandlers
         #endregion
     }
 }
+#endif

@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using Npgsql.BackendMessages;
 using NpgsqlTypes;
 using System.Data;
@@ -36,14 +37,12 @@ namespace Npgsql.TypeHandlers
     [TypeMapping("uuid", NpgsqlDbType.Uuid, DbType.Guid, typeof(Guid))]
     class UuidHandler : NpgsqlSimpleTypeHandler<Guid>
     {
-        public override Guid Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
+        public override Guid Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
         {
-            var a = buf.ReadInt32();
-            var b = buf.ReadInt16();
-            var c = buf.ReadInt16();
-            var d = new byte[8];
-            buf.ReadBytes(d, 0, 8);
-            return new Guid(a, b, c, d);
+            var a = BinaryPrimitives.ReadInt32BigEndian(buf);
+            var b = BinaryPrimitives.ReadInt16BigEndian(buf.Slice(4));
+            var c = BinaryPrimitives.ReadInt16BigEndian(buf.Slice(6));
+            return new Guid(a, b, c, buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
         }
 
         #region Write
@@ -51,15 +50,9 @@ namespace Npgsql.TypeHandlers
         public override int ValidateAndGetLength(Guid value, NpgsqlParameter parameter)
             => 16;
 
-        public override void Write(Guid value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-        {
-            // TODO: Allocation... investigate alternatives?
-            var bytes = value.ToByteArray();
-            buf.WriteInt32(BitConverter.ToInt32(bytes, 0));
-            buf.WriteInt16(BitConverter.ToInt16(bytes, 4));
-            buf.WriteInt16(BitConverter.ToInt16(bytes, 6));
-            buf.WriteBytes(bytes, 8, 8);
-        }
+        // TODO: Allocation... investigate alternatives?
+        public override void Write(Guid value, Span<byte> buf, NpgsqlParameter parameter)
+            => value.ToByteArray().AsSpan().CopyTo(buf);
 
         #endregion
     }

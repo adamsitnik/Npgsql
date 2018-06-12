@@ -26,6 +26,7 @@ using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using NpgsqlTypes;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.GeometricHandlers
 {
     /// <summary>
@@ -52,3 +53,4 @@ namespace Npgsql.TypeHandlers.GeometricHandlers
         }
     }
 }
+#endif

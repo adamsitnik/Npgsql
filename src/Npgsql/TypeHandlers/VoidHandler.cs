@@ -34,13 +34,13 @@ namespace Npgsql.TypeHandlers
     [TypeMapping("void")]
     class VoidHandler : NpgsqlSimpleTypeHandler<DBNull>
     {
-        public override DBNull Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
+        public override DBNull Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
             => DBNull.Value;
 
         public override int ValidateAndGetLength(DBNull value, NpgsqlParameter parameter)
             => throw new NotSupportedException();
 
-        public override void Write(DBNull value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
+        public override void Write(DBNull value, Span<byte> buf, NpgsqlParameter parameter)
             => throw new NotSupportedException();
     }
 }

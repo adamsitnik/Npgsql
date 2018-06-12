@@ -31,6 +31,7 @@ using NpgsqlTypes;
 
 #pragma warning disable 618
 
+#if SPAN
 namespace Npgsql.TypeHandlers.NetworkHandlers
 {
     /// <remarks>
@@ -61,3 +62,4 @@ namespace Npgsql.TypeHandlers.NetworkHandlers
             => InetHandler.DoWrite(value.Address, value.Netmask, buf, true);
     }
 }
+#endif

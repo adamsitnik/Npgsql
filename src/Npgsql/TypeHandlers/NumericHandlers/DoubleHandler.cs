@@ -22,9 +22,11 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using Npgsql.BackendMessages;
 using NpgsqlTypes;
 using System.Data;
+using System.Runtime.InteropServices;
 using Npgsql.PostgresTypes;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
@@ -37,13 +39,14 @@ namespace Npgsql.TypeHandlers.NumericHandlers
     [TypeMapping("double precision", NpgsqlDbType.Double, DbType.Double, typeof(double))]
     class DoubleHandler : NpgsqlSimpleTypeHandler<double>
     {
-        public override double Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
-            => buf.ReadDouble();
+        public override double Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
+            => MemoryMarshal.Read<double>(buf);
 
         public override int ValidateAndGetLength(double value, NpgsqlParameter parameter)
             => 8;
 
-        public override void Write(double value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-            => buf.WriteDouble(value);
+        public override void Write(double value, Span<byte> buf, NpgsqlParameter parameter)
+            => MemoryMarshal.Write(buf, ref value);
+        //=> MemoryMarshal.Cast<byte, double>(buf)[0] = value;
     }
 }

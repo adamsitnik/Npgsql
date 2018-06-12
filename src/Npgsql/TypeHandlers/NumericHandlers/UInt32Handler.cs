@@ -26,6 +26,7 @@ using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using NpgsqlTypes;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.NumericHandlers
 {
     /// <remarks>
@@ -46,3 +47,4 @@ namespace Npgsql.TypeHandlers.NumericHandlers
             => buf.WriteInt32((int)value);
     }
 }
+#endif

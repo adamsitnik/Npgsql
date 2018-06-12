@@ -23,6 +23,7 @@
 
 using Npgsql.BackendMessages;
 using System;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics;
@@ -74,15 +75,14 @@ namespace Npgsql.TypeHandling
         /// required.
         /// </summary>
         /// <param name="buf">The buffer from which to read.</param>
-        /// <param name="len">The byte length of the value. The buffer might not contain the full length, requiring I/O to be performed.</param>
         /// <param name="fieldDescription">Additional PostgreSQL information about the type, such as the length in varchar(30).</param>
         /// <returns>The fully-read value.</returns>
-        public abstract TDefault Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null);
+        public abstract TDefault Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null);
 
         /// <summary>
         /// Reads a value of type <typeparamref name="TDefault"/> with the given length from the provided buffer,
         /// using either sync or async I/O. This method is sealed for <see cref="NpgsqlSimpleTypeHandler{T}"/>,
-        /// override <see cref="Read(Npgsql.NpgsqlReadBuffer,int,Npgsql.BackendMessages.FieldDescription)"/>.
+        /// override <see cref="Read(ReadOnlySpan{byte},Npgsql.BackendMessages.FieldDescription)"/>.
         /// </summary>
         /// <param name="buf">The buffer from which to read.</param>
         /// <param name="len">The byte length of the value. The buffer might not contain the full length, requiring I/O to be performed.</param>
@@ -111,7 +111,7 @@ namespace Npgsql.TypeHandling
         /// Reads a value of type <typeparamref name="TDefault"/> with the given length from the provided buffer.
         /// with the assumption that it is entirely present in the provided memory buffer and no I/O will be
         /// required. Type handlers typically don't need to override this - override
-        /// <see cref="Read(Npgsql.NpgsqlReadBuffer,int,Npgsql.BackendMessages.FieldDescription)"/> - but may do
+        /// <see cref="Read(ReadOnlySpan{byte},Npgsql.BackendMessages.FieldDescription)"/> - but may do
         /// so in exceptional cases where reading of arbitrary types is required.
         /// </summary>
         /// <param name="buf">The buffer from which to read.</param>
@@ -132,7 +132,8 @@ namespace Npgsql.TypeHandling
                 ));
             }
 
-            return asTypedHandler.Read(buf, len, fieldDescription);
+            // TODO: Temporary hack during spanification
+            return asTypedHandler.Read(new Span<byte>(buf.Buffer, buf.ReadPosition, len), fieldDescription);
         }
 
         #endregion Read
@@ -162,7 +163,7 @@ namespace Npgsql.TypeHandling
         /// The <see cref="NpgsqlParameter"/> instance where this value resides. Can be used to access additional
         /// information relevant to the write process (e.g. <see cref="NpgsqlParameter.Size"/>).
         /// </param>
-        public abstract void Write(TDefault value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter);
+        public abstract void Write(TDefault value, Span<byte> buf, NpgsqlParameter parameter);
 
         /// <summary>
         /// This method is sealed, override <see cref="ValidateAndGetLength(TDefault,NpgsqlParameter)"/>.
@@ -188,11 +189,10 @@ namespace Npgsql.TypeHandling
             Debug.Assert(this is INpgsqlSimpleTypeHandler<TAny>);
             var typedHandler = (INpgsqlSimpleTypeHandler<TAny>)this;
 
-            var elementLen = typedHandler.ValidateAndGetLength(value, parameter);
-            if (buf.WriteSpaceLeft < 4 + elementLen)
+            var len = typedHandler.ValidateAndGetLength(value, parameter);
+            if (buf.WriteSpaceLeft < 4 + len)
                 return WriteWithLengthLong();
-            buf.WriteInt32(elementLen);
-            typedHandler.Write(value, buf, parameter);
+            DoWrite();
             return PGUtil.CompletedTask;
 
             async Task WriteWithLengthLong()
@@ -206,16 +206,23 @@ namespace Npgsql.TypeHandling
                 }
 
                 typedHandler = (INpgsqlSimpleTypeHandler<TAny>)this;
-                elementLen = typedHandler.ValidateAndGetLength(value, parameter);
-                if (buf.WriteSpaceLeft < 4 + elementLen)
+                len = typedHandler.ValidateAndGetLength(value, parameter);
+                if (buf.WriteSpaceLeft < 4 + len)
                     await buf.Flush(async);
-                buf.WriteInt32(elementLen);
-                typedHandler.Write(value, buf, parameter);
+                DoWrite();
+            }
+
+            void DoWrite()
+            {
+                // TODO: Spanification temporary hack
+                var span = new Span<byte>(buf.Buffer, buf.WritePosition, 4 + len);
+                BinaryPrimitives.WriteInt32BigEndian(span, len);
+                typedHandler.Write(value, span.Slice(4), parameter);
             }
         }
 
         /// <summary>
-        /// Simple type handlers override <see cref="Write(TDefault,NpgsqlWriteBuffer,NpgsqlParameter)"/> instead of this.
+        /// Simple type handlers override <see cref="Write(TDefault,Span{byte},NpgsqlParameter)"/> instead of this.
         /// </summary>
         public sealed override Task Write(TDefault value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
             => throw new NotSupportedException();

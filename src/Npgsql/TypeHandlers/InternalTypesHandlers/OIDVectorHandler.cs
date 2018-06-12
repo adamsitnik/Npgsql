@@ -28,6 +28,7 @@ using Npgsql.TypeMapping;
 using NpgsqlTypes;
 using System;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.InternalTypesHandlers
 {
     [TypeMapping("oidvector", NpgsqlDbType.Oidvector)]
@@ -55,3 +56,4 @@ namespace Npgsql.TypeHandlers.InternalTypesHandlers
             => new ArrayHandler<ArrayHandler<uint>>(this) { PostgresType = arrayBackendType };
     }
 }
+#endif

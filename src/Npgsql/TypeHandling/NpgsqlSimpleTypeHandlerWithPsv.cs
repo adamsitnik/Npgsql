@@ -52,16 +52,15 @@ namespace Npgsql.TypeHandling
         /// <summary>
         /// Reads a value of type <typeparamref name="TPsv"/> with the given length from the provided buffer,
         /// with the assumption that it is entirely present in the provided memory buffer and no I/O will be
-        /// required. 
+        /// required.
         /// </summary>
         /// <param name="buf">The buffer from which to read.</param>
-        /// <param name="len">The byte length of the value. The buffer might not contain the full length, requiring I/O to be performed.</param>
         /// <param name="fieldDescription">Additional PostgreSQL information about the type, such as the length in varchar(30).</param>
         /// <returns>The fully-read value.</returns>
-        protected abstract TPsv ReadPsv(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null);
+        protected abstract TPsv ReadPsv(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null);
 
-        TPsv INpgsqlSimpleTypeHandler<TPsv>.Read(NpgsqlReadBuffer buf, int len, [CanBeNull] FieldDescription fieldDescription)
-            => ReadPsv(buf, len, fieldDescription);
+        TPsv INpgsqlSimpleTypeHandler<TPsv>.Read(ReadOnlySpan<byte> buf, [CanBeNull] FieldDescription fieldDescription)
+            => ReadPsv(buf, fieldDescription);
 
         /// <summary>
         /// Reads a column as the type handler's provider-specific type, assuming that it is already entirely
@@ -105,7 +104,7 @@ namespace Npgsql.TypeHandling
         /// The <see cref="NpgsqlParameter"/> instance where this value resides. Can be used to access additional
         /// information relevant to the write process (e.g. <see cref="NpgsqlParameter.Size"/>).
         /// </param>
-        public abstract void Write(TPsv value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter);
+        public abstract void Write(TPsv value, Span<byte> buf, NpgsqlParameter parameter);
 
         #endregion Write
 

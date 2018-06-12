@@ -64,8 +64,10 @@ namespace Npgsql.TypeHandlers
 
         #region Read
 
-        public override TEnum Read(NpgsqlReadBuffer buf, int len, FieldDescription fieldDescription = null)
+        public override TEnum Read(ReadOnlySpan<byte> buf, FieldDescription fieldDescription = null)
         {
+            throw new NotImplementedException();
+            /*
             var str = buf.ReadString(len);
             var success = _labelToEnum.TryGetValue(str, out var value);
 
@@ -73,6 +75,7 @@ namespace Npgsql.TypeHandlers
                 throw new NpgsqlSafeReadException(new InvalidCastException($"Received enum value '{str}' from database which wasn't found on enum {typeof(TEnum)}"));
 
             return value;
+            */
         }
 
         #endregion
@@ -84,11 +87,14 @@ namespace Npgsql.TypeHandlers
                 ? Encoding.UTF8.GetByteCount(str)
                 : throw new InvalidCastException($"Can't write value {value} as enum {typeof(TEnum)}");
 
-        public override void Write(TEnum value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter = null)
+        public override void Write(TEnum value, Span<byte> buf, NpgsqlParameter parameter = null)
         {
+            throw new NotImplementedException();
+            /*
             if (!_enumToLabel.TryGetValue(value, out var str))
                 throw new InvalidCastException($"Can't write value {value} as enum {typeof(TEnum)}");
             buf.WriteString(str);
+            */
         }
 
         #endregion

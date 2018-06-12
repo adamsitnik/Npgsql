@@ -28,6 +28,7 @@ using System.Data;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("timestamp", NpgsqlDbType.Timestamp, new[] { DbType.DateTime, DbType.DateTime2 }, new[] { typeof(NpgsqlDateTime), typeof(DateTime) }, DbType.DateTime)]
@@ -260,3 +261,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         #endregion Write
     }
 }
+#endif

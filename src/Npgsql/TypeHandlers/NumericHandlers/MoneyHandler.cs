@@ -29,6 +29,7 @@ using Npgsql.PostgresTypes;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.NumericHandlers
 {
     /// <remarks>
@@ -49,3 +50,4 @@ namespace Npgsql.TypeHandlers.NumericHandlers
             => buf.WriteInt64((long)(Math.Round(value, 2, MidpointRounding.AwayFromZero) * 100m));
     }
 }
+#endif

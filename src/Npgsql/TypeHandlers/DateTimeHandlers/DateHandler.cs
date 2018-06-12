@@ -29,6 +29,7 @@ using JetBrains.Annotations;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if SPAN
 namespace Npgsql.TypeHandlers.DateTimeHandlers
 {
     [TypeMapping("date", NpgsqlDbType.Date, DbType.Date, typeof(NpgsqlDate))]
@@ -134,3 +135,4 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         #endregion Write
     }
 }
+#endif
