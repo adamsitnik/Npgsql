@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -36,10 +37,10 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 8;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteInt32(Length);
-            buf.WriteInt32(80877103);
+            BinaryPrimitives.WriteInt32BigEndian(span, Length);
+            BinaryPrimitives.WriteInt32BigEndian(span.Slice(4), 80877103);
         }
 
         public override string ToString() => "[SSLRequest]";

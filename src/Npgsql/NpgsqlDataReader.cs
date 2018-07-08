@@ -951,8 +951,8 @@ namespace Npgsql
 
             var fieldDescription = RowDescription[ordinal];
             var handler = fieldDescription.Handler;
-            if (!(handler is ByteaHandler))
-                throw new InvalidCastException("GetBytes() not supported for type " + fieldDescription.Name);
+            //if (!(handler is ByteaHandler))
+            //    throw new InvalidCastException("GetBytes() not supported for type " + fieldDescription.Name);
 
             SeekToColumn(ordinal, false).GetAwaiter().GetResult();
             if (ColumnLen == -1)
@@ -1001,8 +1001,8 @@ namespace Npgsql
             CheckRowAndOrdinal(ordinal);
 
             var fieldDescription = RowDescription[ordinal];
-            if (!(fieldDescription.Handler is ByteaHandler))
-                throw new InvalidCastException($"GetStream() not supported for type {fieldDescription.Handler.PgDisplayName}");
+            //if (!(fieldDescription.Handler is ByteaHandler))
+            //    throw new InvalidCastException($"GetStream() not supported for type {fieldDescription.Handler.PgDisplayName}");
 
             return GetStreamInternal(ordinal, async);
         }

@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 
 namespace Npgsql.BackendMessages
@@ -122,10 +123,11 @@ namespace Npgsql.BackendMessages
 
         internal override int Length => 5;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteByte((byte)BackendMessageCode.CopyDone);
-            buf.WriteInt32(4);
+            span[0] = (byte)BackendMessageCode.CopyDone;
+            span = span.Slice(1);
+            BinaryPrimitives.WriteInt32BigEndian(span, 4);
         }
     }
 }

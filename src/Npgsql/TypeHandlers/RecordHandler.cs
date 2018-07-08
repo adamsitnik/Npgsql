@@ -27,6 +27,7 @@ using Npgsql.BackendMessages;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 
+#if NO
 namespace Npgsql.TypeHandlers
 {
     [TypeMapping("record")]
@@ -91,3 +92,4 @@ namespace Npgsql.TypeHandlers
         #endregion
     }
 }
+#endif

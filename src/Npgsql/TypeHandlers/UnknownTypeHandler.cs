@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.IO.Pipelines;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
 using Npgsql.PostgresTypes;
@@ -90,8 +91,10 @@ namespace Npgsql.TypeHandlers
             return base.ValidateAndGetLength(converted, ref lengthCache, parameter);
         }
 
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        protected internal override Task WriteObjectWithLength(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             if (value == null || value is DBNull)
                 return base.WriteObjectWithLength(value, buf, lengthCache, parameter, async);
 
@@ -101,6 +104,7 @@ namespace Npgsql.TypeHandlers
                     ? asString
                     : (string)parameter.ConvertedValue,
                 buf, lengthCache, parameter, async);
+#endif
         }
 
         #endregion Write

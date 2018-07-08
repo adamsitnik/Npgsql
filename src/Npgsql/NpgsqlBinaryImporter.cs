@@ -217,6 +217,8 @@ namespace Npgsql
 
         void Write<T>([CanBeNull] T value, NpgsqlParameter param)
         {
+            throw new NotImplementedException();
+#if NO
             CheckReady();
             if (_column == -1)
                 throw new InvalidOperationException("A row hasn't been started");
@@ -246,6 +248,7 @@ namespace Npgsql
             param.WriteWithLength(_buf, false);
             param.LengthCache?.Clear();
             _column++;
+#endif
         }
 
         /// <summary>

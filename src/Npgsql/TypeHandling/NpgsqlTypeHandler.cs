@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -124,7 +125,7 @@ namespace Npgsql.TypeHandling
         /// <summary>
         /// Called to write the value of a generic <see cref="NpgsqlParameter{T}"/>.
         /// </summary>
-        internal abstract Task WriteWithLengthInternal<TAny>([CanBeNull] TAny value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
+        internal abstract Task WriteWithLengthInternal<TAny>([CanBeNull] TAny value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
 
         /// <summary>
         /// Responsible for validating that a value represents a value of the correct and which can be
@@ -147,14 +148,14 @@ namespace Npgsql.TypeHandling
         /// Writes a value to the provided buffer, using either sync or async I/O.
         /// </summary>
         /// <param name="value">The value to write.</param>
-        /// <param name="buf">The buffer to which to write.</param>
+        /// <param name="writer">The PipeWriter to which to write.</param>
         /// <param name="lengthCache"></param>
         /// <param name="parameter">
         /// The <see cref="NpgsqlParameter"/> instance where this value resides. Can be used to access additional
         /// information relevant to the write process (e.g. <see cref="NpgsqlParameter.Size"/>).
         /// </param>
         /// <param name="async">If I/O is required to read the full length of the value, whether it should be performed synchronously or asynchronously.</param>
-        protected internal abstract Task WriteObjectWithLength([CanBeNull] object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
+        protected internal abstract Task WriteObjectWithLength([CanBeNull] object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
 
         #endregion Write
 
@@ -189,7 +190,7 @@ namespace Npgsql.TypeHandling
 
         #region Code generation for non-generic writing
 
-        internal delegate Task NonGenericWriteWithLength(NpgsqlTypeHandler handler, object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
+        internal delegate Task NonGenericWriteWithLength(NpgsqlTypeHandler handler, object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async);
 
         internal static NonGenericWriteWithLength GenerateNonGenericWriteMethod(Type handlerType, Type interfaceType)
         {

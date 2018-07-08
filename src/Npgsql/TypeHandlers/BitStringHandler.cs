@@ -1,4 +1,5 @@
-﻿#region License
+﻿#if NO
+#region License
 // The PostgreSQL License
 //
 // Copyright (C) 2018 The Npgsql Development Team
@@ -30,6 +31,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -166,8 +168,10 @@ namespace Npgsql.TypeHandlers
             return 4 + (value.Length + 7) / 8;
         }
 
-        public override async Task Write(BitArray value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public override Task Write(BitArray value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             // Initial bitlength byte
             if (buf.WriteSpaceLeft < 4)
                 await buf.Flush(async);
@@ -191,10 +195,13 @@ namespace Npgsql.TypeHandlers
                     return;
                 await buf.Flush(async);
             }
+#endif
         }
 
-        public async Task Write(BitVector32 value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public Task Write(BitVector32 value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             if (buf.WriteSpaceLeft < 8)
                 await buf.Flush(async);
 
@@ -205,6 +212,7 @@ namespace Npgsql.TypeHandlers
                 buf.WriteInt32(32);
                 buf.WriteInt32(value.Data);
             }
+#endif
         }
 
         public async Task Write(bool value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
@@ -215,7 +223,7 @@ namespace Npgsql.TypeHandlers
             buf.WriteByte(value ? (byte)0x80 : (byte)0);
         }
 
-        public async Task Write(string value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public Task Write(string value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
             // Initial bitlength byte
             if (buf.WriteSpaceLeft < 4)
@@ -301,3 +309,4 @@ namespace Npgsql.TypeHandlers
                 : await ReadArray<BitArray>(buf, async);
     }
 }
+#endif

@@ -3,7 +3,7 @@ using JetBrains.Annotations;
 using Npgsql.PostgresTypes;
 using NpgsqlTypes;
 
-#if NETSTANDARD2_0
+#if NETSTANDARD2_0 || NETCOREAPP2_1
 using System.Data.Common;
 #endif
 

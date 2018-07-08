@@ -59,39 +59,35 @@ namespace Npgsql.FrontendMessages
 
         internal override int ResponseMessageCount { get; }
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
-        {
-            buf.WriteBytes(_data, 0, _data.Length);
-        }
+        internal override void WriteFully(Span<byte> span) => _data.CopyTo(span);
 
         public override string ToString() =>  _description ?? "[?]";
 
         static PregeneratedMessage()
         {
-            var buf = new NpgsqlWriteBuffer(null, new MemoryStream(), NpgsqlWriteBuffer.MinimumSize, Encoding.ASCII);
             var message = new QueryMessage(PGUtil.UTF8Encoding);
 
-            BeginTrans                = Generate(buf, message, "BEGIN");
-            SetTransRepeatableRead    = Generate(buf, message, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
-            SetTransSerializable      = Generate(buf, message, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
-            SetTransReadCommitted     = Generate(buf, message, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
-            SetTransReadUncommitted   = Generate(buf, message, "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
-            CommitTransaction         = Generate(buf, message, "COMMIT");
-            RollbackTransaction       = Generate(buf, message, "ROLLBACK");
-            KeepAlive                 = Generate(buf, message, "SELECT NULL");
+            BeginTrans                = Generate(message, "BEGIN");
+            SetTransRepeatableRead    = Generate(message, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+            SetTransSerializable      = Generate(message, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+            SetTransReadCommitted     = Generate(message, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+            SetTransReadUncommitted   = Generate(message, "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
+            CommitTransaction         = Generate(message, "COMMIT");
+            RollbackTransaction       = Generate(message, "ROLLBACK");
+            KeepAlive                 = Generate(message, "SELECT NULL");
 
-            DiscardAll                = Generate(buf, message, "DISCARD ALL");
+            DiscardAll                = Generate(message, "DISCARD ALL");
         }
 
-        internal static PregeneratedMessage Generate(NpgsqlWriteBuffer buf, QueryMessage queryMessage, string query, int responseMessageCount=2)
+        internal static PregeneratedMessage Generate(QueryMessage queryMessage, string query, int responseMessageCount=2)
         {
             Debug.Assert(query != null && query.All(c => c < 128));
             queryMessage.Populate(query);
             var description = queryMessage.ToString();
-            queryMessage.Write(buf, false).Wait();
-            var bytes = buf.GetContents();
-            buf.Clear();
-            return new PregeneratedMessage(bytes, description, responseMessageCount);
+
+            var buf = new byte[queryMessage.Length];
+            queryMessage.WriteFully(new Span<byte>(buf));
+            return new PregeneratedMessage(buf, description, responseMessageCount);
         }
 
         internal static readonly PregeneratedMessage BeginTrans;

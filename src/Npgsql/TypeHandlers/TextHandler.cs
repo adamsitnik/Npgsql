@@ -27,11 +27,13 @@ using Npgsql.BackendMessages;
 using NpgsqlTypes;
 using System.Data;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Text;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
+using Npgsql.Util;
 
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
@@ -264,38 +266,65 @@ namespace Npgsql.TypeHandlers
         public int ValidateAndGetLength(byte[] value, ref NpgsqlLengthCache lengthCache, NpgsqlParameter parameter)
             => value.Length;
 
-        public override Task Write(string value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
-            => WriteString(value, buf, lengthCache, parameter, async);
-
-        public virtual Task Write(char[] value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public override unsafe Task Write(string value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            var byteLen = lengthCache.GetLast();  // Get byte length from validation phase
+            var charLen = parameter == null || parameter.Size <= 0 || parameter.Size >= value.Length
+                ? value.Length
+                : parameter.Size;
+
+            // TODO: truncate, length cache,
+            var span = writer.GetSpan();
+            if (byteLen <= span.Length)
+            {
+                int bytesWritten;
+#if NETCOREAPP2_1
+                bytesWritten = _encoding.GetBytes(value.AsSpan().Slice(0, charLen), span);
+#else
+                fixed (byte* p = &span.GetPinnableReference())
+                fixed (char* c = value)
+                    bytesWritten = _encoding.GetBytes(c, charLen, p, span.Length);
+#endif
+                Debug.Assert(bytesWritten == byteLen);
+                writer.Advance(bytesWritten);
+                return Task.CompletedTask;
+            }
+
+            throw new NotImplementedException();
+        }
+
+        public virtual Task Write(char[] value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        {
+            throw new NotImplementedException();
+#if NO
             var charLen = parameter == null || parameter.Size <= 0 || parameter.Size >= value.Length
                 ? value.Length
                 : parameter.Size;
             return buf.WriteChars(value, 0, charLen, lengthCache.GetLast(), async);
+#endif
         }
 
-        public Task Write(ArraySegment<char> value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public Task Write(ArraySegment<char> value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+            => throw new NotImplementedException();
+#if NO
             => buf.WriteChars(value.Array, value.Offset, value.Count, lengthCache.GetLast(), async);
+#endif
 
-        Task WriteString(string str, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, [CanBeNull] NpgsqlParameter parameter, bool async)
+        public Task Write(char value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
-            var charLen = parameter == null || parameter.Size <= 0 || parameter.Size >= str.Length
-                ? str.Length
-                : parameter.Size;
-            return buf.WriteString(str, charLen, lengthCache.GetLast(), async);
-        }
-
-        public Task Write(char value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
-        {
+            throw new NotImplementedException();
+#if NO
             _singleCharArray[0] = value;
             var len = _encoding.GetByteCount(_singleCharArray);
             return buf.WriteChars(_singleCharArray, 0, 1, len, async);
+#endif
         }
 
-        public Task Write(byte[] value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public Task Write(byte[] value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+            => throw new NotImplementedException();
+#if NO
             => buf.WriteBytesRaw(value, async);
-
+#endif
         #endregion
 
 #pragma warning disable CA2119 // Seal methods that satisfy private interfaces

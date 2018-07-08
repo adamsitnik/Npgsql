@@ -24,6 +24,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -100,19 +101,25 @@ namespace Npgsql.TypeHandlers
         }
 
         // TODO: This boxes the enum (again)
-        protected override Task WriteWithLength<TAny>(TAny value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
-            => WriteObjectWithLength(value, buf, lengthCache, parameter, async);
+        protected override Task WriteWithLength<TAny>(TAny value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+            => throw new NotImplementedException();
+            //=> WriteObjectWithLength(value, buf, lengthCache, parameter, async);
 
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        protected internal override Task WriteObjectWithLength(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             if (value == null || value is DBNull)
                 return WriteWithLengthInternal<DBNull>(null, buf, lengthCache, parameter, async);
             buf.WriteInt32(ValidateAndGetLength(value, ref lengthCache, parameter));
             return Write(value, buf, lengthCache, parameter, async);
+#endif
         }
 
-        internal Task Write(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        internal Task Write(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             var type = value.GetType();
             if (type == typeof(string))
                 return base.Write((string)(object)value, buf, lengthCache, parameter, async);
@@ -123,6 +130,7 @@ namespace Npgsql.TypeHandlers
             if (!_enumToLabel.TryGetValue((Enum)(object)value, out var str))
                 throw new InvalidCastException($"Can't write value {value} as enum {type}");
             return base.Write(str, buf, lengthCache, parameter, async);
+#endif
         }
 
         #endregion

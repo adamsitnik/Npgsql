@@ -24,6 +24,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -187,19 +188,27 @@ namespace Npgsql.TypeHandlers
             return lengthCache.Lengths[pos] = totalLen;
         }
 
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        protected internal override Task WriteObjectWithLength(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+            => throw new NotImplementedException();
+#if NO
             => value == null || value is DBNull
                 ? WriteWithLengthInternal<DBNull>(null, buf, lengthCache, parameter, async)
                 : WriteWithLength(value, buf, lengthCache, parameter, async);
+#endif
 
-        protected override Task WriteWithLength<T2>(T2 value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        protected override Task WriteWithLength<T2>(T2 value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             buf.WriteInt32(ValidateAndGetLength(value, ref lengthCache, parameter));
             return Write(value, buf, lengthCache, parameter, async);
+#endif
         }
 
-        public override async Task Write(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public override Task Write(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             Debug.Assert(_resolvedType != null);
             Debug.Assert(_members != null);
 
@@ -218,6 +227,7 @@ namespace Npgsql.TypeHandlers
                 buf.WriteUInt32(fieldDescriptor.OID);
                 await fieldHandler.WriteObjectWithLength(fieldValue, buf, lengthCache, null, async);
             }
+#endif
         }
 
         #endregion
@@ -233,7 +243,8 @@ namespace Npgsql.TypeHandlers
             _members = new List<MemberDescriptor>(rawFields.Count);
             foreach (var rawField in rawFields)
             {
-                var member = new MemberDescriptor { PgName = rawField.Name, OID = rawField.Type.OID };
+                //var member = new MemberDescriptor { PgName = rawField.Name, OID = rawField.Type.OID };
+                var member = new MemberDescriptor { PgName = rawField.Name };
                 if (!_typeMapper.TryGetByOID(rawField.Type.OID, out member.Handler))
                     throw new Exception($"PostgreSQL composite type {PgDisplayName} has field {rawField.Name} with an unknown type (TypeOID={rawField.Type.OID})");
                 _members.Add(member);
@@ -304,7 +315,7 @@ namespace Npgsql.TypeHandlers
             // ReSharper disable once NotAccessedField.Local
             // ReSharper disable once MemberCanBePrivate.Local
             internal string PgName;
-            internal uint OID;
+            //internal uint OID;
             internal NpgsqlTypeHandler Handler;
             internal MemberValueGetter Getter;
             internal MemberValueSetter Setter;

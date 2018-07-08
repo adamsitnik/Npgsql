@@ -20,7 +20,7 @@
 // ON AN "AS IS" BASIS, AND THE NPGSQL DEVELOPMENT TEAM HAS NO OBLIGATIONS
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #endregion
-
+#if NO
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
@@ -80,3 +80,4 @@ namespace Npgsql.TypeHandlers.GeometricHandlers
         #endregion
     }
 }
+#endif

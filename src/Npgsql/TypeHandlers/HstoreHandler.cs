@@ -20,7 +20,7 @@
 // ON AN "AS IS" BASIS, AND THE NPGSQL DEVELOPMENT TEAM HAS NO OBLIGATIONS
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #endregion
-
+#if NO
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -132,3 +132,4 @@ namespace Npgsql.TypeHandlers
     }
 #pragma warning restore CA1061 // Do not hide base class methods
 }
+#endif

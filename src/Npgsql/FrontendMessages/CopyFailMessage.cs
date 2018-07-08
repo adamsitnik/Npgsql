@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -50,13 +51,14 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 1 + 4 + (_errorMessageLen + 1);
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteByte(Code);
-            buf.WriteInt32(Length - 1);
+            span[0] = Code;
+            span = span.Slice(1);
+            BinaryPrimitives.WriteInt32BigEndian(span, Length - 1);
             // Error message not supported for now
             Debug.Assert(_errorMessage == null);
-            buf.WriteByte(0);
+            span[4] = 0;
         }
 
         public override string ToString() => "[CopyFail]";

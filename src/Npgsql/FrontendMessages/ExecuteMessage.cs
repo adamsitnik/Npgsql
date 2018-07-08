@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -49,15 +50,17 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 1 + 4 + 1 + 4;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
             Debug.Assert(Portal != null && Portal.All(c => c < 128));
 
-            buf.WriteByte(Code);
-            buf.WriteInt32(Length - 1);
+            span[0] = Code;
+            span = span.Slice(1);
+            BinaryPrimitives.WriteInt32BigEndian(span, Length - 1);
             Debug.Assert(Portal == string.Empty);
-            buf.WriteByte(0);   // Portal is always an empty string
-            buf.WriteInt32(MaxRows);
+            span[4] = 0;   // Portal is always an empty string
+            span = span.Slice(5);
+            BinaryPrimitives.WriteInt32BigEndian(span, MaxRows);
         }
 
         public override string ToString()

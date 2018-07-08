@@ -22,10 +22,12 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
@@ -51,14 +53,17 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 1 + 4 + 1 + (Name.Length + 1);
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
             Debug.Assert(Name != null && Name.All(c => c < 128));
 
-            buf.WriteByte(Code);
-            buf.WriteInt32(Length - 1);
-            buf.WriteByte((byte)StatementOrPortal);
-            buf.WriteNullTerminatedString(Name);
+            span[0] = Code;
+            span = span.Slice(1);
+            BinaryPrimitives.WriteInt32BigEndian(span, Length - 1);
+            span[4] = (byte)StatementOrPortal;
+            span = span.Slice(5);
+
+            span.WriteNullTerminatedString(Encoding.ASCII, Name);
         }
 
         public override string ToString() => $"[Describe({StatementOrPortal}={Name})]";

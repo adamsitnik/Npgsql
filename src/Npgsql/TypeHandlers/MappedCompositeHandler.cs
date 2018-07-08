@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -42,8 +43,8 @@ namespace Npgsql.TypeHandlers
         public override int ValidateAndGetLength(T value, ref NpgsqlLengthCache lengthCache, NpgsqlParameter parameter)
             => _wrappedHandler.ValidateAndGetLength(value, ref lengthCache, parameter);
 
-        public override Task Write(T value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
-           => _wrappedHandler.Write(value, buf, lengthCache, parameter, async);
+        public override Task Write(T value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+           => _wrappedHandler.Write(value, writer, lengthCache, parameter, async);
     }
 
     class MappedCompositeTypeHandlerFactory<T> : NpgsqlTypeHandlerFactory<T>

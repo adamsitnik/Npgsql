@@ -243,7 +243,7 @@ ORDER BY attnum";
 
             if (column.DataType != null)
             {
-                column.IsLong = handler is ByteaHandler;
+                //column.IsLong = handler is ByteaHandler;
 
                 if (handler is IMappedCompositeHandler)
                     column.UdtAssemblyQualifiedName = column.DataType.AssemblyQualifiedName;

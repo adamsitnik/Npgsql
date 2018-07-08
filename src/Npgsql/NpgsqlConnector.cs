@@ -420,7 +420,7 @@ namespace Npgsql
                 if (Settings.Database == null)
                     Settings.Database = username;
                 WriteStartupMessage(username);
-                await WriteBuffer.Flush(async);
+                await Writer.FlushAsync(cancellationToken);
                 timeout.Check();
 
                 await Authenticate(username, timeout, async);
@@ -476,7 +476,7 @@ namespace Npgsql
 
         void WriteStartupMessage(string username)
         {
-            var startupMessage = new StartupMessage
+            var startupMessage = new StartupMessage(TextEncoding)
             {
                 ["user"] = username,
                 ["client_encoding"] =
@@ -504,11 +504,7 @@ namespace Npgsql
             if (timezone != null)
                 startupMessage["TimeZone"] = timezone;
 
-            // Should really never happen, just in case
-            if (startupMessage.Length > WriteBuffer.Size)
-                throw new Exception("Startup message bigger than buffer");
-
-            startupMessage.WriteFully(WriteBuffer);
+            startupMessage.WriteFully(Writer.GetSpan(startupMessage.Length));
         }
 
         string GetUsername()
@@ -565,13 +561,18 @@ namespace Npgsql
                     : Encoding.GetEncoding(Settings.Encoding, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
                 ReadBuffer = new NpgsqlReadBuffer(this, _stream, Settings.ReadBufferSize, TextEncoding);
                 WriteBuffer = new NpgsqlWriteBuffer(this, _stream, Settings.WriteBufferSize, TextEncoding);
+                var duplexPipe = StreamConnection.GetDuplex(_stream);
+                Reader = duplexPipe.Input;
+                Writer = duplexPipe.Output;
                 ParseMessage = new ParseMessage(TextEncoding);
                 QueryMessage = new QueryMessage(TextEncoding);
 
                 if (SslMode == SslMode.Require || SslMode == SslMode.Prefer)
                 {
-                    SSLRequestMessage.Instance.WriteFully(WriteBuffer);
-                    await WriteBuffer.Flush(async);
+                    var buf = new byte[SSLRequestMessage.Instance.Length];
+                    SSLRequestMessage.Instance.WriteFully(buf);
+                    _stream.Write(buf, 0, SSLRequestMessage.Instance.Length);
+                    await _stream.FlushAsync(cancellationToken);
 
                     await ReadBuffer.Ensure(1, async);
                     var response = (char)ReadBuffer.ReadByte();
@@ -618,6 +619,9 @@ namespace Npgsql
                         ReadBuffer.Clear();  // Reset to empty after reading single SSL char
                         ReadBuffer.Underlying = _stream;
                         WriteBuffer.Underlying = _stream;
+                        duplexPipe = StreamConnection.GetDuplex(_stream);
+                        Reader = duplexPipe.Input;
+                        Writer = duplexPipe.Output;
                         IsSecure = true;
                         Log.Trace("SSL negotiation successful");
                         break;
@@ -629,10 +633,6 @@ namespace Npgsql
                     WriteBuffer.AwaitableSocket = new AwaitableSocket(new SocketAsyncEventArgs(), _socket);
                     ReadBuffer.AwaitableSocket = new AwaitableSocket(new SocketAsyncEventArgs(), _socket);
                 }
-
-                var duplexPipe = StreamConnection.GetDuplex(_stream);
-                Reader = duplexPipe.Input;
-                Writer = duplexPipe.Output;
 
                 Log.Trace($"Socket connected to {Host}:{Port}");
             }
@@ -877,7 +877,7 @@ namespace Npgsql
         {
             _pendingPrependedResponses += msg.ResponseMessageCount;
 
-            var t = msg.Write(WriteBuffer, false);
+            var t = msg.Write(Writer, false);
             Debug.Assert(t.IsCompleted, $"Could not fully write message of type {msg.GetType().Name} into the buffer");
         }
 
@@ -885,8 +885,9 @@ namespace Npgsql
 
         internal void SendMessage(FrontendMessage message)
         {
-            message.Write(WriteBuffer, false).Wait();
-            WriteBuffer.Flush();
+            message.Write(Writer, false).Wait();
+            // TODO: REALLY BAD
+            Writer.FlushAsync().GetAwaiter().GetResult();
         }
 
         #endregion
@@ -1504,7 +1505,7 @@ namespace Npgsql
 
             responseMessages++;  // One ReadyForQuery at the end
 
-            _resetWithoutDeallocateMessage = PregeneratedMessage.Generate(WriteBuffer, QueryMessage, sb.ToString(), responseMessages);
+            _resetWithoutDeallocateMessage = PregeneratedMessage.Generate(QueryMessage, sb.ToString(), responseMessages);
         }
 
         /// <summary>
@@ -1990,8 +1991,8 @@ namespace Npgsql
 
             Log.Trace($"Executing internal command: {message}", Id);
 
-            await message.Write(WriteBuffer, async);
-            await WriteBuffer.Flush(async);
+            await message.Write(Writer, async);
+            await Writer.FlushAsync();
             Expect<CommandCompleteMessage>(await ReadMessage(async));
             Expect<ReadyForQueryMessage>(await ReadMessage(async));
         }

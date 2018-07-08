@@ -63,8 +63,8 @@ namespace Npgsql
 
             await PasswordMessage
                 .CreateClearText(passwd)
-                .Write(WriteBuffer, async);
-            await WriteBuffer.Flush(async);
+                .Write(Writer, async);
+            await Writer.FlushAsync();
             Expect<AuthenticationRequestMessage>(await ReadMessage(async));
         }
 
@@ -83,8 +83,8 @@ namespace Npgsql
             var clientNonce = GetNonce();
 
             await new SASLInitialResponseMessage(mechanism, PGUtil.UTF8Encoding.GetBytes("n,,n=*,r=" + clientNonce))
-                .Write(WriteBuffer, async);
-            await WriteBuffer.Flush(async);
+                .Write(Writer, async);
+            await Writer.FlushAsync();
 
             var saslContinueMsg = Expect<AuthenticationSASLContinueMessage>(await ReadMessage(async));
             if (saslContinueMsg.AuthRequestType != AuthenticationRequestType.AuthenticationSASLContinue)
@@ -94,8 +94,8 @@ namespace Npgsql
                 throw new InvalidOperationException("[SCRAM] Malformed SCRAMServerFirst message: server nonce doesn't start with client nonce");
 
             var scramFinalClientMsg = new SCRAMClientFinalMessage(passwd, firstServerMsg.Nonce, firstServerMsg.Salt, firstServerMsg.Iteration, clientNonce);
-            await scramFinalClientMsg.Write(WriteBuffer, async);
-            await WriteBuffer.Flush(async);
+            await scramFinalClientMsg.Write(Writer, async);
+            await Writer.FlushAsync();
 
             var saslFinalServerMsg = Expect<AuthenticationSASLFinalMessage>(await ReadMessage(async));
             if (saslFinalServerMsg.AuthRequestType != AuthenticationRequestType.AuthenticationSASLFinal)
@@ -127,8 +127,8 @@ namespace Npgsql
 
             await PasswordMessage
                 .CreateMD5(passwd, username, salt)
-                .Write(WriteBuffer, async);
-            await WriteBuffer.Flush(async);
+                .Write(Writer, async);
+            await Writer.FlushAsync();
             Expect<AuthenticationRequestMessage>(await ReadMessage(async));
         }
 
@@ -218,8 +218,8 @@ namespace Npgsql
                 if (count > _leftToWrite)
                     throw new NpgsqlException($"NegotiateStream trying to write {count} bytes but according to frame header we only have {_leftToWrite} left!");
                 await _msg.Populate(buffer, offset, count)
-                    .Write(_connector.WriteBuffer, false);
-                await _connector.WriteBuffer.Flush(async);
+                    .Write(_connector.Writer, false);
+                await _connector.Writer.FlushAsync();
                 _leftToWrite -= count;
             }
 

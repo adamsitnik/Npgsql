@@ -22,13 +22,16 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
@@ -66,6 +69,114 @@ namespace Npgsql.FrontendMessages
             return this;
         }
 
+        internal override async Task Write(PipeWriter writer, bool async)
+        {
+            Debug.Assert(Statement != null && Statement.All(c => c < 128));
+            Debug.Assert(Portal != null && Portal.All(c => c < 128));
+
+            WriteHeader();
+
+            foreach (var param in InputParameters)
+            {
+                param.LengthCache?.Rewind();
+                await param.WriteWithLength(writer, async);
+            }
+
+            WriteTrailer();
+
+            void WriteHeader()
+            {
+                var formatCodesSum = 0;
+                var paramsLength = 0;
+                foreach (var p in InputParameters)
+                {
+                    formatCodesSum += (int)p.FormatCode;
+                    p.LengthCache?.Rewind();
+                    paramsLength += p.ValidateAndGetLength();
+                }
+
+                var formatCodeListLength = formatCodesSum == 0 ? 0 : formatCodesSum == InputParameters.Count ? 1 : InputParameters.Count;
+
+                var headerLength =
+                    1 +                         // Message code
+                    4 +                         // Message length
+                    1 +                         // Portal is always empty (only a null terminator)
+                    Statement.Length + 1 +
+                    2 +                         // Number of parameter format codes that follow
+                    2 * formatCodeListLength +  // List of format codes
+                    2;                          // Number of parameters
+
+                var messageLength = headerLength +
+                    4 * InputParameters.Count +               // Parameter lengths
+                    paramsLength +                            // Parameter values
+                    2 +                                       // Number of result format codes
+                    2 * (UnknownResultTypeList?.Length ?? 1); // Result format codes
+
+                var span = writer.GetSpan(headerLength);
+
+                span[0] = Code;
+                span = span.Slice(1);
+
+                BinaryPrimitives.WriteInt32BigEndian(span, messageLength - 1);
+                span = span.Slice(4);
+
+                Debug.Assert(Portal == string.Empty);
+                span[0] = 0;  // Portal is always empty
+                span = span.Slice(1);
+
+                span = span.Slice(span.WriteNullTerminatedString(Encoding.ASCII, Statement));
+                BinaryPrimitives.WriteInt32BigEndian(span, formatCodeListLength);
+
+                // 0 length implicitly means all-text, 1 means all-binary, >1 means mix-and-match
+                switch (formatCodeListLength)
+                {
+                case 0:   // All-text parameters, nothing needed
+                    break;
+
+                case 1:   // All-binary parameters (normal case)
+                    BinaryPrimitives.WriteInt16BigEndian(span, (short)FormatCode.Binary);
+                    span = span.Slice(2);
+                    break;
+
+                default:  // Mix-and-match, some text and some binary
+                    foreach (var p in InputParameters)
+                    {
+                        BinaryPrimitives.WriteInt16BigEndian(span, (short)p.FormatCode);
+                        span = span.Slice(2);
+                    }
+                    break;
+                }
+
+                BinaryPrimitives.WriteInt16BigEndian(span, (short)InputParameters.Count);
+
+                writer.Advance(headerLength);
+            }
+
+            void WriteTrailer()
+            {
+                if (UnknownResultTypeList != null)
+                {
+                    throw new NotImplementedException();
+#if NO
+                if (buf.WriteSpaceLeft < 2 + UnknownResultTypeList.Length * 2)
+                    await buf.Flush(async);
+                buf.WriteInt16(UnknownResultTypeList.Length);
+                foreach (var t in UnknownResultTypeList)
+                    buf.WriteInt16(t ? 0 : 1);
+#endif
+                }
+                else
+                {
+                    var span = writer.GetSpan(4);
+                    BinaryPrimitives.WriteInt16BigEndian(span, 1);
+                    span = span.Slice(2);
+                    BinaryPrimitives.WriteInt16BigEndian(span, (short)(AllResultTypesAreUnknown ? 0 : 1));
+                    writer.Advance(4);
+                }
+            }
+        }
+
+#if NO
         internal override async Task Write(NpgsqlWriteBuffer buf, bool async)
         {
             Debug.Assert(Statement != null && Statement.All(c => c < 128));
@@ -107,7 +218,7 @@ namespace Npgsql.FrontendMessages
             buf.WriteInt32(messageLength - 1);
             Debug.Assert(Portal == string.Empty);
             buf.WriteByte(0);  // Portal is always empty
-            
+
             buf.WriteNullTerminatedString(Statement);
             buf.WriteInt16(formatCodeListLength);
 
@@ -155,7 +266,7 @@ namespace Npgsql.FrontendMessages
                 buf.WriteInt16(AllResultTypesAreUnknown ? 0 : 1);
             }
         }
-
+#endif
         public override string ToString()
             => $"[Bind(Portal={Portal},Statement={Statement},NumParams={InputParameters.Count}]";
     }

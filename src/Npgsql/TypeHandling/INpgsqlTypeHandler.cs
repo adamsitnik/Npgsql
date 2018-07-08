@@ -21,6 +21,7 @@
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #endregion
 
+using System.IO.Pipelines;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
@@ -62,7 +63,7 @@ namespace Npgsql.TypeHandling
         /// Writes a value to the provided buffer.
         /// </summary>
         /// <param name="value">The value to write.</param>
-        /// <param name="buf">The buffer to which to write.</param>
+        /// <param name="writer">The pipe writer to which to write.</param>
         /// <param name="lengthCache">A cache where the length calculated during the validation phase can be stored for use at the writing phase.</param>
         /// <param name="parameter">
         /// The <see cref="NpgsqlParameter"/> instance where this value resides. Can be used to access additional
@@ -71,6 +72,6 @@ namespace Npgsql.TypeHandling
         /// <param name="async">
         /// If I/O will be necessary (i.e. the buffer is full), determines whether it will be done synchronously or asynchronously.
         /// </param>
-        Task Write(T value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, [CanBeNull] NpgsqlParameter parameter, bool async);
+        Task Write(T value, PipeWriter writer, NpgsqlLengthCache lengthCache, [CanBeNull] NpgsqlParameter parameter, bool async);
     }
 }

@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,10 +39,10 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 1 + 4;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteByte(Code);
-            buf.WriteInt32(4);
+            span[0] = Code;
+            BinaryPrimitives.WriteInt32BigEndian(span.Slice(1), 4);
         }
 
         public override string ToString() => "[Sync]";

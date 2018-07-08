@@ -27,6 +27,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -176,13 +177,14 @@ namespace Npgsql.TypeHandling
         /// <summary>
         /// In the vast majority of cases writing a parameter to the buffer won't need to perform I/O.
         /// </summary>
-        internal sealed override Task WriteWithLengthInternal<TAny>(TAny value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        internal sealed override Task WriteWithLengthInternal<TAny>(TAny value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            Span<byte> span;
             if (value == null || typeof(TAny) == typeof(DBNull))
             {
-                if (buf.WriteSpaceLeft < 4)
-                    return WriteWithLengthLong();
-                buf.WriteInt32(-1);
+                span = writer.GetSpan(4);
+                BinaryPrimitives.WriteInt32BigEndian(span, -1);
+                writer.Advance(4);
                 return PGUtil.CompletedTask;
             }
 
@@ -190,41 +192,17 @@ namespace Npgsql.TypeHandling
             var typedHandler = (INpgsqlSimpleTypeHandler<TAny>)this;
 
             var len = typedHandler.ValidateAndGetLength(value, parameter);
-            if (buf.WriteSpaceLeft < 4 + len)
-                return WriteWithLengthLong();
-            DoWrite();
+            span = writer.GetSpan(4 + len);
+            BinaryPrimitives.WriteInt32BigEndian(span, len);
+            typedHandler.Write(value, span.Slice(4), parameter);
+            writer.Advance(4 + len);
             return PGUtil.CompletedTask;
-
-            async Task WriteWithLengthLong()
-            {
-                if (value == null || typeof(TAny) == typeof(DBNull))
-                {
-                    if (buf.WriteSpaceLeft < 4)
-                        await buf.Flush(async);
-                    buf.WriteInt32(-1);
-                    return;
-                }
-
-                typedHandler = (INpgsqlSimpleTypeHandler<TAny>)this;
-                len = typedHandler.ValidateAndGetLength(value, parameter);
-                if (buf.WriteSpaceLeft < 4 + len)
-                    await buf.Flush(async);
-                DoWrite();
-            }
-
-            void DoWrite()
-            {
-                // TODO: Spanification temporary hack
-                var span = new Span<byte>(buf.Buffer, buf.WritePosition, 4 + len);
-                BinaryPrimitives.WriteInt32BigEndian(span, len);
-                typedHandler.Write(value, span.Slice(4), parameter);
-            }
         }
 
         /// <summary>
         /// Simple type handlers override <see cref="Write(TDefault,Span{byte},NpgsqlParameter)"/> instead of this.
         /// </summary>
-        public sealed override Task Write(TDefault value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public sealed override Task Write(TDefault value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
             => throw new NotSupportedException();
 
         /// <summary>
@@ -248,10 +226,10 @@ namespace Npgsql.TypeHandling
         /// Called to write the value of a non-generic <see cref="NpgsqlParameter"/>.
         /// Type handlers generally don't need to override this.
         /// </summary>
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        protected internal override Task WriteObjectWithLength(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
             => value == null || value is DBNull  // For null just go through the default WriteWithLengthInternal
-                ? WriteWithLengthInternal<DBNull>(null, buf, lengthCache, parameter, async)
-                : _nonGenericWriteWithLength(this, value, buf, lengthCache, parameter, async);
+                ? WriteWithLengthInternal<DBNull>(null, writer, lengthCache, parameter, async)
+                : _nonGenericWriteWithLength(this, value, writer, lengthCache, parameter, async);
 
         #endregion
 

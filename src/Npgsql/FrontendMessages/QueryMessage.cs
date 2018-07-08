@@ -22,19 +22,22 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
     /// <summary>
     /// A simple query message.
     /// </summary>
-    class QueryMessage : FrontendMessage
+    class QueryMessage : SimpleFrontendMessage
     {
         readonly Encoding _encoding;
         string _query;
@@ -51,24 +54,22 @@ namespace Npgsql.FrontendMessages
             Debug.Assert(query != null);
 
             _query = query;
+            _length = 1 + 4 + _encoding.GetByteCount(_query) + 1;
             return this;
         }
 
-        internal override async Task Write(NpgsqlWriteBuffer buf, bool async)
+        internal override int Length => _length;
+        int _length;
+
+        internal override void WriteFully(Span<byte> span)
         {
-            if (buf.WriteSpaceLeft < 1 + 4)
-                await buf.Flush(async);
-            var queryByteLen = _encoding.GetByteCount(_query);
+            span[0] = Code;
+            span = span.Slice(1);
 
-            buf.WriteByte(Code);
-            buf.WriteInt32(4 +            // Message length (including self excluding code)
-                           queryByteLen + // Query byte length
-                           1);            // Null terminator
+            BinaryPrimitives.WriteInt32BigEndian(span, _length - 1);
+            span = span.Slice(4);
 
-            await buf.WriteString(_query, queryByteLen, async);
-            if (buf.WriteSpaceLeft < 1)
-                await buf.Flush(async);
-            buf.WriteByte(0);
+            span.WriteNullTerminatedString(_encoding, _query);
         }
 
         public override string ToString() => $"[Query={_query}]";

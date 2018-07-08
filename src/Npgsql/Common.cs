@@ -24,6 +24,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -43,13 +44,13 @@ namespace Npgsql
     /// </summary>
     abstract class FrontendMessage
     {
-        /// <param name="buf">the buffer into which to write the message.</param>
+        /// <param name="writer">the pipe writer into which to write the message.</param>
         /// <param name="async"></param>
         /// <returns>
         /// Whether there was enough space in the buffer to contain the entire message.
         /// If false, the buffer should be flushed and write should be called again.
         /// </returns>
-        internal abstract Task Write(NpgsqlWriteBuffer buf, bool async);
+        internal abstract Task Write(PipeWriter writer, bool async);
 
         /// <summary>
         /// Returns how many messages PostgreSQL is expected to send in response to this message.
@@ -73,22 +74,13 @@ namespace Npgsql
         /// <summary>
         /// Writes the message contents into the buffer.
         /// </summary>
-        internal abstract void WriteFully(NpgsqlWriteBuffer buf);
+        internal abstract void WriteFully(Span<byte> span);
 
-        internal sealed override Task Write(NpgsqlWriteBuffer buf, bool async)
+        internal sealed override Task Write(PipeWriter writer, bool async)
         {
-            if (buf.WriteSpaceLeft < Length)
-                return FlushAndWrite(buf, async);
-            Debug.Assert(Length <= buf.WriteSpaceLeft, $"Message of type {GetType().Name} has length {Length} which is bigger than the buffer ({buf.WriteSpaceLeft})");
-            WriteFully(buf);
+            WriteFully(writer.GetSpan(Length));
+            writer.Advance(Length);
             return PGUtil.CompletedTask;
-        }
-
-        async Task FlushAndWrite(NpgsqlWriteBuffer buf, bool async)
-        {
-            await buf.Flush(async);
-            Debug.Assert(Length <= buf.WriteSpaceLeft, $"Message of type {GetType().Name} has length {Length} which is bigger than the buffer ({buf.WriteSpaceLeft})");
-            WriteFully(buf);
         }
     }
 

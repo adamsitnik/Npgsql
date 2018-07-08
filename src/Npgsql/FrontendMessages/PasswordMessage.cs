@@ -22,13 +22,16 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
@@ -109,22 +112,22 @@ namespace Npgsql.FrontendMessages
             return this;
         }
 
-        internal override async Task Write(NpgsqlWriteBuffer buf, bool async)
+        internal override Task Write(PipeWriter writer, bool async)
         {
-            if (buf.WriteSpaceLeft < 1 + 5)
-                await buf.Flush(async);
-            buf.WriteByte(Code);
-            buf.WriteInt32(4 + PayloadLength);
+            var span = writer.GetSpan(1 + 4 + PayloadLength);
 
-            if (PayloadLength <= buf.WriteSpaceLeft)
-            {
-                // The entire array fits in our buffer, copy it into the buffer as usual.
-                buf.WriteBytes(Payload, PayloadOffset, Payload.Length);
-                return;
-            }
+            span[0] = Code;
+            span = span.Slice(1);
 
-            await buf.Flush(async);
-            buf.DirectWrite(Payload, PayloadOffset, PayloadLength);
+            BinaryPrimitives.WriteInt32BigEndian(span, 4 + PayloadLength);
+            span = span.Slice(4);
+
+            // TODO: We really should write directly into the span, but perf here is negligible
+            if (!new Span<byte>(Payload, PayloadOffset, PayloadLength).TryCopyTo(span))
+                throw new Exception("Could not write password message");
+            writer.Advance(1 + 4 + PayloadLength);
+
+            return Task.CompletedTask;
         }
 
         public override string ToString() =>  "[Password]";
@@ -151,19 +154,23 @@ namespace Npgsql.FrontendMessages
             PGUtil.UTF8Encoding.GetByteCount(_mechanism) + 1 +
             4 + _initialResponse?.Length ?? 0;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteByte(Code);
-            buf.WriteInt32(Length - 1);
+            span[0] = Code;
+            span = span.Slice(1);
 
-            buf.WriteString(_mechanism);
-            buf.WriteByte(0);   // null terminator
+            BinaryPrimitives.WriteInt32BigEndian(span, Length - 1);
+            span = span.Slice(4);
+
+            span = span.Slice(span.WriteNullTerminatedString(PGUtil.UTF8Encoding, _mechanism));
+
             if (_initialResponse == null)
-                buf.WriteInt32(-1);
+                BinaryPrimitives.WriteInt32BigEndian(span, -1);
             else
             {
-                buf.WriteInt32(_initialResponse.Length);
-                buf.WriteBytes(_initialResponse);
+                BinaryPrimitives.WriteInt32BigEndian(span, _initialResponse.Length);
+                span = span.Slice(4);
+                _initialResponse.CopyTo(span);
             }
         }
     }
@@ -206,11 +213,15 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 1 + 4 + PGUtil.UTF8Encoding.GetByteCount(_messageStr);
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteByte(Code);
-            buf.WriteInt32(Length - 1);
-            buf.WriteString(_messageStr);
+            span[0] = Code;
+            span = span.Slice(1);
+
+            BinaryPrimitives.WriteInt32BigEndian(span, Length - 1);
+            span = span.Slice(4);
+
+            span.WriteString(PGUtil.UTF8Encoding, _messageStr);
         }
 
         static byte[] Hi(string str, byte[] salt, int count)

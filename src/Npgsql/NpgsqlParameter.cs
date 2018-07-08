@@ -31,6 +31,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Threading.Tasks;
 
 namespace Npgsql
@@ -553,10 +554,10 @@ namespace Npgsql
             return len;
         }
 
-        internal virtual Task WriteWithLength(NpgsqlWriteBuffer buf, bool async)
+        internal virtual Task WriteWithLength(PipeWriter writer, bool async)
         {
             Debug.Assert(Handler != null);
-            return Handler.WriteObjectWithLength(Value, buf, LengthCache, this, async);
+            return Handler.WriteObjectWithLength(Value, writer, LengthCache, this, async);
         }
 
         /// <inheritdoc />

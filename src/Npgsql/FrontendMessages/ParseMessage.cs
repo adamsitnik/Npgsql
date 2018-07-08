@@ -22,13 +22,16 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.TypeMapping;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
@@ -76,14 +79,11 @@ namespace Npgsql.FrontendMessages
             return this;
         }
 
-        internal override async Task Write(NpgsqlWriteBuffer buf, bool async)
+        internal override Task Write(PipeWriter writer, bool async)
         {
             Debug.Assert(Statement != null && Statement.All(c => c < 128));
 
             var queryByteLen = _encoding.GetByteCount(Query);
-            if (buf.WriteSpaceLeft < 1 + 4 + Statement.Length + 1)
-                await buf.Flush(async);
-
             var messageLength =
                 1 +                         // Message code
                 4 +                         // Length
@@ -94,23 +94,29 @@ namespace Npgsql.FrontendMessages
                 2 +                         // Number of parameters
                 ParameterTypeOIDs.Count * 4;
 
-            buf.WriteByte(Code);
-            buf.WriteInt32(messageLength - 1);
-            buf.WriteNullTerminatedString(Statement);
+            // TODO: We require a continuous buffer for the entire message, reconsider
+            var span = writer.GetSpan(messageLength);
 
-            await buf.WriteString(Query, queryByteLen, async);
+            span[0] = Code;
+            span = span.Slice(1);
 
-            if (buf.WriteSpaceLeft < 1 + 2)
-                await buf.Flush(async);
-            buf.WriteByte(0); // Null terminator for the query
-            buf.WriteInt16((short)ParameterTypeOIDs.Count);
+            BinaryPrimitives.WriteInt32BigEndian(span, messageLength - 1);
+            span = span.Slice(4);
+
+            span = span.Slice(span.WriteNullTerminatedString(Encoding.ASCII, Statement));
+            span = span.Slice(span.WriteNullTerminatedString(_encoding, Statement));
+
+            BinaryPrimitives.WriteInt16BigEndian(span, (short)ParameterTypeOIDs.Count);
+            span = span.Slice(2);
 
             foreach (var t in ParameterTypeOIDs)
             {
-                if (buf.WriteSpaceLeft < 4)
-                    await buf.Flush(async);
-                buf.WriteInt32((int)t);
+                BinaryPrimitives.WriteInt32BigEndian(span, (int)t);
+                span = span.Slice(2);
             }
+
+            writer.Advance(messageLength);
+            return Task.CompletedTask;
         }
 
         public override string ToString()

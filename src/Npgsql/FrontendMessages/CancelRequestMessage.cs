@@ -22,6 +22,7 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -44,14 +45,17 @@ namespace Npgsql.FrontendMessages
 
         internal override int Length => 16;
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
             Debug.Assert(BackendProcessId != 0);
 
-            buf.WriteInt32(Length);
-            buf.WriteInt32(CancelRequestCode);
-            buf.WriteInt32(BackendProcessId);
-            buf.WriteInt32(BackendSecretKey);
+            BinaryPrimitives.WriteInt32BigEndian(span, Length);
+            span = span.Slice(4);
+            BinaryPrimitives.WriteInt32BigEndian(span, CancelRequestCode);
+            span = span.Slice(4);
+            BinaryPrimitives.WriteInt32BigEndian(span, BackendProcessId);
+            span = span.Slice(4);
+            BinaryPrimitives.WriteInt32BigEndian(span, BackendSecretKey);
         }
 
         public override string ToString() => $"[CancelRequest(BackendProcessId={BackendProcessId})]";

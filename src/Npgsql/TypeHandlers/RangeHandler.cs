@@ -23,6 +23,7 @@
 
 using Npgsql.BackendMessages;
 using System;
+using System.IO.Pipelines;
 using System.Threading.Tasks;
 using NpgsqlTypes;
 using Npgsql.PostgresTypes;
@@ -97,8 +98,10 @@ namespace Npgsql.TypeHandlers
             return totalLen;
         }
 
-        public override async Task Write(NpgsqlRange<TElement> value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        public override Task Write(NpgsqlRange<TElement> value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             if (buf.WriteSpaceLeft < 1)
                 await buf.Flush(async);
             buf.WriteByte((byte)value.Flags);
@@ -108,6 +111,7 @@ namespace Npgsql.TypeHandlers
                 await ElementHandler.WriteWithLengthInternal(value.LowerBound, buf, lengthCache, null, async);
             if (!value.UpperBoundInfinite)
                 await ElementHandler.WriteWithLengthInternal(value.UpperBound, buf, lengthCache, null, async);
+#endif
         }
 
         #endregion

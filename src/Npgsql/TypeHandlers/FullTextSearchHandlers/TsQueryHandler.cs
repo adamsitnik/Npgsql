@@ -20,6 +20,7 @@
 // ON AN "AS IS" BASIS, AND THE NPGSQL DEVELOPMENT TEAM HAS NO OBLIGATIONS
 // TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 #endregion
+#if NO
 
 using Npgsql.BackendMessages;
 using NpgsqlTypes;
@@ -301,3 +302,4 @@ namespace Npgsql.TypeHandlers.FullTextSearchHandlers
         #endregion Write
     }
 }
+#endif

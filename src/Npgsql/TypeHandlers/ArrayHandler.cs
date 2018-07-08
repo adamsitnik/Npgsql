@@ -28,6 +28,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO.Pipelines;
 using System.Threading.Tasks;
 
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
@@ -47,7 +48,7 @@ namespace Npgsql.TypeHandlers
         internal override NpgsqlTypeHandler CreateRangeHandler(PostgresType rangeBackendType)
             => throw new NotSupportedException();
     }
-    
+
     /// <summary>
     /// Base class for all type handlers which handle PostgreSQL arrays.
     /// </summary>
@@ -259,8 +260,10 @@ namespace Npgsql.TypeHandlers
             return len;
         }
 
-        internal override Task WriteWithLengthInternal<TAny>(TAny value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+        internal override Task WriteWithLengthInternal<TAny>(TAny value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
         {
+            throw new NotImplementedException();
+#if NO
             if (buf.WriteSpaceLeft < 4)
                 return WriteWithLengthLong();
 
@@ -298,10 +301,15 @@ namespace Npgsql.TypeHandlers
 
                 throw CantWriteTypeException(value.GetType());
             }
+#endif
         }
 
         // The default WriteObjectWithLength casts the type handler to INpgsqlTypeHandler<T>, but that's not sufficient for
         // us (need to handle many types of T, e.g. int[], int[,]...)
+        protected internal override Task WriteObjectWithLength(object value, PipeWriter writer, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
+            => throw new NotImplementedException();
+
+#if NO
         protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache lengthCache, NpgsqlParameter parameter, bool async)
             => value == null || value is DBNull
                 ? WriteWithLengthInternal<DBNull>(null, buf, lengthCache, parameter, async)
@@ -367,6 +375,7 @@ namespace Npgsql.TypeHandlers
             foreach (var element in value)
                 await _elementHandler.WriteObjectWithLength(element, buf, lengthCache, null, async);
         }
+#endif
 
         #endregion
     }

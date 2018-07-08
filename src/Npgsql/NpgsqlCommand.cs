@@ -829,7 +829,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             var connector = Connection.Connector;
             Debug.Assert(connector != null);
 
-            var buf = connector.WriteBuffer;
+            var writer = connector.Writer;
             for (var i = 0; i < _statements.Count; i++)
             {
                 async = ForceAsyncIfNecessary(async, i);
@@ -844,12 +844,12 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                         // We have a prepared statement that replaces an existing statement - close the latter first.
                         await connector.CloseMessage
                             .Populate(StatementOrPortal.Statement, pStatement.StatementBeingReplaced.Name)
-                            .Write(buf, async);
+                            .Write(writer, async);
                     }
 
                     await connector.ParseMessage
                         .Populate(statement.SQL, statement.StatementName, statement.InputParameters, connector.TypeMapper)
-                        .Write(buf, async);
+                        .Write(writer, async);
                 }
 
                 var bind = connector.BindMessage;
@@ -858,21 +858,21 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     bind.AllResultTypesAreUnknown = AllResultTypesAreUnknown;
                 else if (i == 0 && UnknownResultTypeList != null)
                     bind.UnknownResultTypeList = UnknownResultTypeList;
-                await connector.BindMessage.Write(buf, async);
+                await connector.BindMessage.Write(writer, async);
 
                 if (pStatement == null || pStatement.State == PreparedState.ToBePrepared)
                 {
                     await connector.DescribeMessage
                         .Populate(StatementOrPortal.Portal)
-                        .Write(buf, async);
+                        .Write(writer, async);
                     if (statement.PreparedStatement != null)
                         statement.PreparedStatement.State = PreparedState.BeingPrepared;
                 }
 
-                await ExecuteMessage.DefaultExecute.Write(buf, async);
+                await ExecuteMessage.DefaultExecute.Write(writer, async);
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
+            await SyncMessage.Instance.Write(writer, async);
+            await writer.FlushAsync();
             CleanupSend();
         }
 
@@ -884,7 +884,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
             var wroteSomething = false;
 
-            var buf = connector.WriteBuffer;
+            var writer = connector.Writer;
             for (var i = 0; i < _statements.Count; i++)
             {
                 async = ForceAsyncIfNecessary(async, i);
@@ -897,18 +897,18 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                 await connector.ParseMessage
                     .Populate(statement.SQL, "", statement.InputParameters, connector.TypeMapper)
-                    .Write(buf, async);
+                    .Write(writer, async);
 
                 await connector.DescribeMessage
                     .Populate(StatementOrPortal.Statement, statement.StatementName)
-                    .Write(buf, async);
+                    .Write(writer, async);
                 wroteSomething = true;
             }
 
             if (wroteSomething)
             {
-                await SyncMessage.Instance.Write(buf, async);
-                await buf.Flush(async);
+                await SyncMessage.Instance.Write(writer, async);
+                await writer.FlushAsync();
             }
             CleanupSend();
         }
@@ -918,21 +918,21 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             BeginSend();
             var connector = Connection.Connector;
             Debug.Assert(connector != null);
-            var buf = connector.WriteBuffer;
+            var writer = connector.Writer;
             for (var i = 0; i < _statements.Count; i++)
             {
                 async = ForceAsyncIfNecessary(async, i);
 
                 await connector.ParseMessage
                     .Populate(_statements[i].SQL, string.Empty)
-                    .Write(buf, async);
+                    .Write(writer, async);
 
                 await connector.DescribeMessage
                     .Populate(StatementOrPortal.Statement, string.Empty)
-                    .Write(buf, async);
+                    .Write(writer, async);
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
+            await SyncMessage.Instance.Write(writer, async);
+            await writer.FlushAsync();
             CleanupSend();
         }
 
@@ -941,7 +941,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             BeginSend();
             var connector = Connection.Connector;
             Debug.Assert(connector != null);
-            var buf = connector.WriteBuffer;
+            var writer = connector.Writer;
             for (var i = 0; i < _statements.Count; i++)
             {
                 async = ForceAsyncIfNecessary(async, i);
@@ -960,21 +960,21 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // We have a prepared statement that replaces an existing statement - close the latter first.
                     await connector.CloseMessage
                         .Populate(StatementOrPortal.Statement, statementToClose.Name)
-                        .Write(buf, async);
+                        .Write(writer, async);
                 }
 
                 await connector.ParseMessage
                     .Populate(statement.SQL, pStatement.Name, statement.InputParameters, connector.TypeMapper)
-                    .Write(buf, async);
+                    .Write(writer, async);
 
                 await connector.DescribeMessage
                     .Populate(StatementOrPortal.Statement, pStatement.Name)
-                    .Write(buf, async);
+                    .Write(writer, async);
 
                 pStatement.State = PreparedState.BeingPrepared;
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
+            await SyncMessage.Instance.Write(writer, async);
+            await writer.FlushAsync();
             CleanupSend();
         }
 
@@ -996,7 +996,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             var connector = Connection.Connector;
             Debug.Assert(connector != null);
 
-            var buf = connector.WriteBuffer;
+            var writer = connector.Writer;
             foreach (var statement in _statements.Where(s => s.IsPrepared))
             {
                 if (FlushOccurred)
@@ -1007,12 +1007,12 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                 await connector.CloseMessage
                     .Populate(StatementOrPortal.Statement, statement.StatementName)
-                    .Write(buf, async);
+                    .Write(writer, async);
                 Debug.Assert(statement.PreparedStatement != null);
                 statement.PreparedStatement.State = PreparedState.BeingUnprepared;
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
+            await SyncMessage.Instance.Write(writer, async);
+            await writer.FlushAsync();
             CleanupSend();
         }
 

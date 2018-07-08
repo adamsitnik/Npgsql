@@ -22,9 +22,10 @@
 #endregion
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
+using Npgsql.Util;
 
 namespace Npgsql.FrontendMessages
 {
@@ -34,6 +35,13 @@ namespace Npgsql.FrontendMessages
         int _length;
 
         const int ProtocolVersion3 = 3 << 16; // 196608
+
+        internal Encoding Encoding { get; }
+
+        internal StartupMessage(Encoding encoding)
+        {
+            Encoding = encoding;
+        }
 
         internal string this[string key]
         {
@@ -55,20 +63,20 @@ namespace Npgsql.FrontendMessages
             }
         }
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
+        internal override void WriteFully(Span<byte> span)
         {
-            buf.WriteInt32(_length);
-            buf.WriteInt32(ProtocolVersion3);
+            BinaryPrimitives.WriteInt32BigEndian(span, _length);
+            span = span.Slice(4);
+            BinaryPrimitives.WriteInt32BigEndian(span, ProtocolVersion3);
+            span = span.Slice(4);
 
             foreach (var kv in _parameters)
             {
-                buf.WriteString(kv.Key);
-                buf.WriteByte(0);
-                buf.WriteString(kv.Value);
-                buf.WriteByte(0);
+                span = span.Slice(span.WriteNullTerminatedString(Encoding, kv.Key));
+                span = span.Slice(span.WriteNullTerminatedString(Encoding, kv.Value));
             }
 
-            buf.WriteByte(0);
+            span[0] = 0;
         }
     }
 }
