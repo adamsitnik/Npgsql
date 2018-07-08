@@ -512,7 +512,7 @@ namespace Npgsql
             if (!string.IsNullOrEmpty(username))
                 return Settings.Username;
 
-#if NET45 || NET451
+#if NET6
             if (PGUtil.IsWindows && Type.GetType("Mono.Runtime") == null)
             {
                 username = WindowsUsernameProvider.GetUsername(Settings.IncludeRealm);

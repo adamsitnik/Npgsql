@@ -32,7 +32,7 @@ using JetBrains.Annotations;
 using NUnit.Framework;
 
 // TransactionScope exists in netstandard20, but distributed transactions do not
-#if NET451
+#if NET461
 
 namespace Npgsql.Tests
 {

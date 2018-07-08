@@ -1195,7 +1195,7 @@ namespace Npgsql.Tls
                 // We include two checks - one compile-time and one runtime - to allow everyone
                 // to be happy. The OPTIMIZED_CRYPTOGRAPHY define is only enabled explicitly
                 // at the build server
-#if OPTIMIZED_CRYPTOGRAPHY && (NET45 || NET451)
+#if OPTIMIZED_CRYPTOGRAPHY && NET461
                 if (Type.GetType("Mono.Runtime") != null)
                     res = EllipticCurve.VerifySignature(pkParameters, pkKey, hash, signature);
                 else
@@ -1215,7 +1215,7 @@ namespace Npgsql.Tls
             }
             else
             {
-#if NET45 || NET451
+#if NET461
                 var pubKey = _handshakeData.CertList[0].PublicKey.Key;
                 var rsa = pubKey as RSACryptoServiceProvider;
                 var dsa = pubKey as DSACryptoServiceProvider;
@@ -1396,7 +1396,7 @@ namespace Npgsql.Tls
                     var cert2 = cert as X509Certificate2;
                     if (cert2 == null)
                         cert2 = new X509Certificate2(cert
-#if !(NET45 || NET451)
+#if !NET461
                             .Export(X509ContentType.Cert)
 #endif
                             );
@@ -1442,7 +1442,7 @@ namespace Npgsql.Tls
 
         HandshakeType SendCertificateVerify(ref int offset)
         {
-#if NET45 || NET451
+#if NET461
             var key = new X509Certificate2(_clientCertificates[0]).PrivateKey;
 
             var keyDsa = key as DSACryptoServiceProvider;
@@ -1453,7 +1453,7 @@ namespace Npgsql.Tls
 
             byte[] signature = null, hash = null;
 
-#if NET45 || NET451
+#if NET461
             if (keyDsa != null)
             {
                 if (_pendingConnState.TlsVersion == TlsVersion.TLSv1_2 && !_handshakeData.SupportedSignatureAlgorithms.Contains(Tuple.Create(TlsHashAlgorithm.SHA1, SignatureAlgorithm.DSA)))
@@ -1527,7 +1527,7 @@ namespace Npgsql.Tls
                 }
                 else
                 {
-#if NET45 || NET451
+#if NET461
                     signature = keyRsa.SignHash(hash, Utils.HashNameToOID["SHA1"]);
 #else
                     signature = keyRsa.SignHash(hash, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
@@ -1552,7 +1552,7 @@ namespace Npgsql.Tls
                 _handshakeData.CertificateVerifyHash_MD5 = null;
             }
 
-#if NET45 || NET451
+#if NET461
             key.Dispose();
 #endif
 
@@ -1750,7 +1750,7 @@ namespace Npgsql.Tls
 
         void ResetWritePos()
             => _writePos = _connState.WriteStartPos;
-	
+
         void CheckNotClosed()
         {
             if (_closed)
@@ -1856,7 +1856,7 @@ namespace Npgsql.Tls
                 {
                     throw new InvalidOperationException("Must perform initial handshake before writing application data");
                 }
-                
+
                 for (;;)
                 {
                     var toWrite = Math.Min(WriteSpaceLeft, len);
@@ -1954,7 +1954,7 @@ namespace Npgsql.Tls
             if (len < 0 || len > buffer.Length - offset)
                 throw new ArgumentOutOfRangeException("len");
 #endif
-            
+
             try
             {
                 for (; ; )

@@ -149,7 +149,7 @@ namespace Npgsql
         internal static StringComparer InvariantCaseIgnoringStringComparer => StringComparer.InvariantCultureIgnoreCase;
 
         internal static bool IsWindows =>
-#if NET45 || NET451
+#if NET461
             Environment.OSVersion.Platform == PlatformID.Win32NT;
 #else
             System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
@@ -207,7 +207,7 @@ namespace Npgsql
         internal CultureSetter(CultureInfo newCulture)
         {
             _oldCulture = CultureInfo.CurrentCulture;
-#if NET45 || NET451
+#if NET461
             Thread.CurrentThread.CurrentCulture = newCulture;
 #else
             CultureInfo.CurrentCulture = newCulture;
@@ -216,7 +216,7 @@ namespace Npgsql
 
         public void Dispose()
         {
-#if NET45 || NET451
+#if NET461
             Thread.CurrentThread.CurrentCulture = _oldCulture;
 #else
             CultureInfo.CurrentCulture = _oldCulture;
