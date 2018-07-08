@@ -25,6 +25,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -41,6 +42,7 @@ using Npgsql.BackendMessages;
 using Npgsql.FrontendMessages;
 using Npgsql.Logging;
 using Npgsql.TypeMapping;
+using Pipelines.Sockets.Unofficial;
 using static Npgsql.Statics;
 
 namespace Npgsql
@@ -92,6 +94,9 @@ namespace Npgsql
         /// Buffer used for writing data.
         /// </summary>
         internal NpgsqlWriteBuffer WriteBuffer { get; private set; }
+
+        internal PipeReader Reader { get; private set; }
+        internal PipeWriter Writer { get; private set; }
 
         /// <summary>
         /// The secret key of the backend for this connector, used for query cancellation.
@@ -624,6 +629,10 @@ namespace Npgsql
                     WriteBuffer.AwaitableSocket = new AwaitableSocket(new SocketAsyncEventArgs(), _socket);
                     ReadBuffer.AwaitableSocket = new AwaitableSocket(new SocketAsyncEventArgs(), _socket);
                 }
+
+                var duplexPipe = StreamConnection.GetDuplex(_stream);
+                Reader = duplexPipe.Input;
+                Writer = duplexPipe.Output;
 
                 Log.Trace($"Socket connected to {Host}:{Port}");
             }

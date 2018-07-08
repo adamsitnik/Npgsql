@@ -34,6 +34,8 @@
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
     <PackageReference Include="System.Memory" Version="4.5.0" />
     <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.0" />
+    <PackageReference Include="System.IO.Pipelines" Version="4.5.0" />
+    <PackageReference Include="Pipelines.Sockets.Unofficial" Version="0.2.1-alpha.58" />
 <!-- Causes issues in Appveyor and Travis
     <PackageReference Include="Microsoft.CodeQuality.Analyzers" Version="2.6.0-beta2" PrivateAssets="All" />
 -->
