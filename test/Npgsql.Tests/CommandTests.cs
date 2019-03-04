@@ -988,6 +988,7 @@ namespace Npgsql.Tests
             }
         }
 
+        /*
         [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1037")]
         public void Statements()
         {
@@ -1021,6 +1022,7 @@ namespace Npgsql.Tests
                 }
             }
         }
+        */
 
         [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1429")]
         public void SameCommandDifferentParamValues()

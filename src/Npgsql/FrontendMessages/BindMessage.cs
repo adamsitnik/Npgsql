@@ -18,7 +18,7 @@ namespace Npgsql.FrontendMessages
         /// </summary>
         string Statement { get; set; }
 
-        List<NpgsqlParameter> InputParameters { get; set; }
+        IList<NpgsqlParameter> InputParameters { get; set; }
         internal List<FormatCode> ResultFormatCodes { get; private set; }
         internal bool AllResultTypesAreUnknown { get; set; }
         [CanBeNull]
@@ -26,7 +26,7 @@ namespace Npgsql.FrontendMessages
 
         const byte Code = (byte)'B';
 
-        internal BindMessage Populate(List<NpgsqlParameter> inputParameters, string portal = "", string statement = "")
+        internal BindMessage Populate(IList<NpgsqlParameter> inputParameters, string portal = "", string statement = "")
         {
             Debug.Assert(inputParameters != null && inputParameters.All(p => p.IsInputDirection));
             Debug.Assert(portal != null);

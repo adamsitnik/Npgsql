@@ -32,7 +32,7 @@ namespace Npgsql.FrontendMessages
             ParameterTypeOIDs = new List<uint>();
         }
 
-        internal ParseMessage Populate(string sql, string statementName, List<NpgsqlParameter> inputParameters, ConnectorTypeMapper typeMapper)
+        internal ParseMessage Populate(string sql, string statementName, IList<NpgsqlParameter> inputParameters, ConnectorTypeMapper typeMapper)
         {
             Populate(sql, statementName);
             foreach (var inputParam in inputParameters)

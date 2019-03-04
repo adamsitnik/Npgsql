@@ -48,16 +48,78 @@ namespace Npgsql
         readonly List<NpgsqlStatement> _statements;
 
         /// <summary>
-        /// Returns details about each statement that this command has executed.
-        /// Is only populated when an Execute* method is called.
+        /// A command set used to hold the parsed results when the user-provided CommandText may contain multiple statements.
+        /// This can only occur when in non-raw mode, and when the command is executed directly (i.e. not as part of a set).
         /// </summary>
-        public IReadOnlyList<NpgsqlStatement> Statements => _statements.AsReadOnly();
+        internal NpgsqlCommandSet CommandSet { get; }
+
+        /// <summary>
+        /// The SQL CommandText of this command after any client-side processing has been done (e.g. parameter placeholder rewriting).
+        /// This is the same as CommandText in raw SQL mode.
+        /// </summary>
+        internal string RawCommandText { get; set; } = "";
+
+        /// <summary>
+        /// Specifies the type of query, e.g. SELECT.
+        /// </summary>
+        internal StatementType StatementType { get; set; }
+
+        /// <summary>
+        /// The number of rows affected or retrieved.
+        /// </summary>
+        /// <remarks>
+        /// See the command tag in the CommandComplete message,
+        /// http://www.postgresql.org/docs/current/static/protocol-message-formats.html
+        /// </remarks>
+        internal ulong Rows { get; set; }
+
+        /// <summary>
+        /// For an INSERT, the object ID of the inserted row if <see cref="Rows"/> is 1 and
+        /// the target table has OIDs; otherwise 0.
+        /// </summary>
+        internal uint OID { get; set; }
+
+        /// <summary>
+        /// Holds the server-side (prepared) statement name. Empty string for non-prepared statements.
+        /// </summary>
+        internal string StatementName => PreparedStatement?.Name ?? "";
 
         UpdateRowSource _updateRowSource = UpdateRowSource.Both;
 
-        bool IsExplicitlyPrepared => _connectorPreparedOn != null;
+        [CanBeNull]
+        internal PreparedStatement PreparedStatement
+        {
+            get => _preparedStatement != null && _preparedStatement.State == PreparedState.Unprepared
+                ? _preparedStatement = null
+                : _preparedStatement;
+            set => _preparedStatement = value;
+        }
 
-        static readonly SingleThreadSynchronizationContext SingleThreadSynchronizationContext = new SingleThreadSynchronizationContext("NpgsqlRemainingAsyncSendWorker");
+        [CanBeNull]
+        PreparedStatement _preparedStatement;
+
+        /// <summary>
+        /// The RowDescription message for this query. If null, the query does not return rows (e.g. INSERT)
+        /// </summary>
+        [CanBeNull]
+        internal RowDescriptionMessage Description
+        {
+            get => PreparedStatement == null ? _description : PreparedStatement.Description;
+            set
+            {
+                if (PreparedStatement == null)
+                    _description = value;
+                else
+                    PreparedStatement.Description = value;
+            }
+        }
+
+        [CanBeNull]
+        RowDescriptionMessage _description;
+
+        bool _isDisposed;
+
+        internal bool IsExplicitlyPrepared => _connectorPreparedOn != null;
 
         static readonly NpgsqlLogger Log = NpgsqlLogManager.GetCurrentClassLogger();
 
@@ -100,12 +162,15 @@ namespace Npgsql
         public NpgsqlCommand(string cmdText, [CanBeNull] NpgsqlConnection connection, [CanBeNull] NpgsqlTransaction transaction)
         {
             GC.SuppressFinalize(this);
-            _statements = new List<NpgsqlStatement>(1);
             _parameters = new NpgsqlParameterCollection();
             _commandText = cmdText;
             Connection = connection;
             Transaction = transaction;
             CommandType = CommandType.Text;
+            // TODO: Remove
+            _statements = new List<NpgsqlStatement>(1);
+            //if (!Connection.Settings.RawSqlMode)
+            //    CommandSet = new NpgsqlCommandSet();  // Only needed for backwards compat, i.e. concatenation batching
         }
 
         #endregion Constructors
@@ -232,9 +297,9 @@ namespace Npgsql
         /// <summary>
         /// Returns whether this query will execute as a prepared (compiled) query.
         /// </summary>
-        public bool IsPrepared =>
-            _connectorPreparedOn == Connection?.Connector &&
-            _statements.Any() && _statements.All(s => s.PreparedStatement?.IsPrepared == true);
+        public bool IsPrepared => _connectorPreparedOn == Connection?.Connector && PreparedStatement?.IsPrepared == true;
+
+        internal void ResetExplicitPreparation() => _connectorPreparedOn = null;
 
         #endregion Public properties
 
@@ -297,29 +362,6 @@ namespace Npgsql
 
         #endregion
 
-        #region State management
-
-        int _state;
-
-        /// <summary>
-        /// Gets the current state of the connector
-        /// </summary>
-        internal CommandState State
-        {
-            private get { return (CommandState)_state; }
-            set
-            {
-                var newState = (int)value;
-                if (newState == _state)
-                    return;
-                Interlocked.Exchange(ref _state, newState);
-            }
-        }
-
-        void ResetExplicitPreparation() => _connectorPreparedOn = null;
-
-        #endregion State management
-
         #region Parameters
 
         /// <summary>
@@ -379,7 +421,10 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         internal void DeriveParameters()
         {
-            if (Statements.Any(s => s?.PreparedStatement.IsExplicit == true))
+            // TODO: Implement on NpgsqlCommandSet
+            //if (Statements.Any(s => s?.PreparedStatement.IsExplicit == true))
+            //    throw new NpgsqlException("Deriving parameters isn't supported for commands that are already prepared.");
+            if (IsPrepared)
                 throw new NpgsqlException("Deriving parameters isn't supported for commands that are already prepared.");
 
             // Here we unprepare statements that possibly are auto-prepared
@@ -473,6 +518,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         void DeriveParametersForQuery()
         {
+            throw new NotImplementedException();
+            /*
             var connector = CheckReadyAndGetConnector();
             using (connector.StartUserAction())
             {
@@ -532,6 +579,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 Expect<ReadyForQueryMessage>(connector.ReadMessage());
                 sendTask.GetAwaiter().GetResult();
             }
+            */
         }
 
         #endregion
@@ -565,6 +613,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         Task Prepare(bool async)
         {
+            throw new NotImplementedException();
+/*
             var connector = CheckReadyAndGetConnector();
             for (var i = 0; i < Parameters.Count; i++)
                 Parameters[i].Bind(connector.TypeMapper);
@@ -642,6 +692,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                         sendTask.GetAwaiter().GetResult();
                 }
             }
+            */
         }
 
         /// <summary>
@@ -651,6 +702,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// </summary>
         public void Unprepare()
         {
+            throw new NotImplementedException();
+            /*
             if (_statements.All(s => !s.IsPrepared))
                 return;
 
@@ -669,38 +722,39 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 Expect<ReadyForQueryMessage>(connector.ReadMessage());
                 sendTask.GetAwaiter().GetResult();
             }
+            */
         }
 
         #endregion Prepare
 
         #region Query analysis
 
-        void ProcessRawQuery(bool deriveParameters = false)
+        internal void ProcessCommandText(bool rawMode, bool deriveParameters = false)
         {
             if (string.IsNullOrEmpty(CommandText))
                 throw new InvalidOperationException("CommandText property has not been initialized");
 
-            NpgsqlStatement statement;
+            // 1. Raw mode: no parsing/rewriting of SQL will occur whatsoever.
+            // 2. Non-raw mode within a batch: parameter placeholders are rewritten (@p -> $1), but a semicolon will trigger an
+            //    exception (no batch within a batch)
+            // 3. Non-raw mode outside of a batch: parameter placeholders are rewritten (@p -> $1), and a semicolon will parse
+            //    into a batch.
+
             switch (CommandType) {
             case CommandType.Text:
-                Debug.Assert(_connection?.Connector != null);
-                var connector = _connection.Connector;
-                connector.SqlParser.ParseRawQuery(CommandText, connector.UseConformantStrings, _parameters, _statements, deriveParameters);
-                if (_statements.Count > 1 && _parameters.HasOutputParameters)
-                    throw new NotSupportedException("Commands with multiple queries cannot have out parameters");
+                if (rawMode)
+                    RawCommandText = CommandText;
+                else
+                {
+                    var connector = _connection.Connector;
+                    Debug.Assert(_connection?.Connector != null);
+                    Debug.Assert(connector.SqlRewriter != null, $"{nameof(NpgsqlConnectionStringBuilder.RawSqlMode)} is false and SqlRewriter is null");
+                    connector.SqlRewriter.Rewrite(this, deriveParameters);
+                }
                 break;
 
             case CommandType.TableDirect:
-                if (_statements.Count == 0)
-                    statement = new NpgsqlStatement();
-                else
-                {
-                    statement = _statements[0];
-                    statement.Reset();
-                    _statements.Clear();
-                }
-                _statements.Add(statement);
-                statement.SQL = "SELECT * FROM " + CommandText;
+                RawCommandText = "SELECT * FROM " + CommandText;
                 break;
 
             case CommandType.StoredProcedure:
@@ -738,256 +792,55 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     }
                 }
                 sb.Append(')');
-
-                if (_statements.Count == 0)
-                    statement = new NpgsqlStatement();
-                else
-                {
-                    statement = _statements[0];
-                    statement.Reset();
-                    _statements.Clear();
-                }
-                statement.SQL = sb.ToString();
-                statement.InputParameters.AddRange(inputList);
-                _statements.Add(statement);
+                RawCommandText = sb.ToString();
                 break;
+
             default:
                 throw new InvalidOperationException($"Internal Npgsql bug: unexpected value {CommandType} of enum {nameof(CommandType)}. Please file a bug.");
             }
-
-            foreach (var s in _statements)
-                if (s.InputParameters.Count > 65535)
-                    throw new Exception("A statement cannot have more than 65535 parameters");
         }
 
         #endregion
 
-        #region Execute
+        #region Sending
 
-        void ValidateParameters()
+        internal async Task WriteExecuteSingle(NpgsqlConnector connector, bool async)
         {
-            for (var i = 0; i < Parameters.Count; i++)
-            {
-                var p = Parameters[i];
-                if (!p.IsInputDirection)
-                    continue;
-                p.Bind(Connection.Connector.TypeMapper);
-                p.LengthCache?.Clear();
-                p.ValidateAndGetLength();
-            }
-        }
-
-        #endregion
-
-        #region Message Creation / Population
-
-        internal bool FlushOccurred { get; set; }
-
-        void BeginSend()
-        {
-            Debug.Assert(Connection?.Connector != null);
-            Connection.Connector.WriteBuffer.CurrentCommand = this;
-            FlushOccurred = false;
-        }
-
-        void CleanupSend()
-        {
-            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
-            if (SynchronizationContext.Current != null)  // Check first because SetSynchronizationContext allocates
-                SynchronizationContext.SetSynchronizationContext(null);
-        }
-
-        async Task SendExecute(bool async)
-        {
-            BeginSend();
-            var connector = Connection.Connector;
-            Debug.Assert(connector != null);
-
             var buf = connector.WriteBuffer;
-            for (var i = 0; i < _statements.Count; i++)
+
+            if (PreparedStatement == null || PreparedStatement.State == PreparedState.ToBePrepared)
             {
-                async = ForceAsyncIfNecessary(async, i);
-
-                var statement = _statements[i];
-                var pStatement = statement.PreparedStatement;
-
-                if (pStatement == null || pStatement.State == PreparedState.ToBePrepared)
-                {
-                    if (pStatement?.StatementBeingReplaced != null)
-                    {
-                        // We have a prepared statement that replaces an existing statement - close the latter first.
-                        await connector.CloseMessage
-                            .Populate(StatementOrPortal.Statement, pStatement.StatementBeingReplaced.Name)
-                            .Write(buf, async);
-                    }
-
-                    await connector.ParseMessage
-                        .Populate(statement.SQL, statement.StatementName, statement.InputParameters, connector.TypeMapper)
-                        .Write(buf, async);
-                }
-
-                var bind = connector.BindMessage;
-                bind.Populate(statement.InputParameters, "", statement.StatementName);
-                if (AllResultTypesAreUnknown)
-                    bind.AllResultTypesAreUnknown = AllResultTypesAreUnknown;
-                else if (i == 0 && UnknownResultTypeList != null)
-                    bind.UnknownResultTypeList = UnknownResultTypeList;
-                await connector.BindMessage.Write(buf, async);
-
-                if (pStatement == null || pStatement.State == PreparedState.ToBePrepared)
-                {
-                    await connector.DescribeMessage
-                        .Populate(StatementOrPortal.Portal)
-                        .Write(buf, async);
-                    if (statement.PreparedStatement != null)
-                        statement.PreparedStatement.State = PreparedState.BeingPrepared;
-                }
-
-                await ExecuteMessage.DefaultExecute.Write(buf, async);
-            }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
-            CleanupSend();
-        }
-
-        async Task SendExecuteSchemaOnly(bool async)
-        {
-            BeginSend();
-            var connector = Connection.Connector;
-            Debug.Assert(connector != null);
-
-            var wroteSomething = false;
-
-            var buf = connector.WriteBuffer;
-            for (var i = 0; i < _statements.Count; i++)
-            {
-                async = ForceAsyncIfNecessary(async, i);
-
-                var statement = _statements[i];
-
-                if (statement.PreparedStatement?.State == PreparedState.Prepared)
-                    continue;   // Prepared, we already have the RowDescription
-                Debug.Assert(statement.PreparedStatement == null);
-
-                await connector.ParseMessage
-                    .Populate(statement.SQL, "", statement.InputParameters, connector.TypeMapper)
-                    .Write(buf, async);
-
-                await connector.DescribeMessage
-                    .Populate(StatementOrPortal.Statement, statement.StatementName)
-                    .Write(buf, async);
-                wroteSomething = true;
-            }
-
-            if (wroteSomething)
-            {
-                await SyncMessage.Instance.Write(buf, async);
-                await buf.Flush(async);
-            }
-            CleanupSend();
-        }
-
-        async Task SendDeriveParameters(bool async)
-        {
-            BeginSend();
-            var connector = Connection.Connector;
-            Debug.Assert(connector != null);
-            var buf = connector.WriteBuffer;
-            for (var i = 0; i < _statements.Count; i++)
-            {
-                async = ForceAsyncIfNecessary(async, i);
-
-                await connector.ParseMessage
-                    .Populate(_statements[i].SQL, string.Empty)
-                    .Write(buf, async);
-
-                await connector.DescribeMessage
-                    .Populate(StatementOrPortal.Statement, string.Empty)
-                    .Write(buf, async);
-            }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
-            CleanupSend();
-        }
-
-        async Task SendPrepare(bool async)
-        {
-            BeginSend();
-            var connector = Connection.Connector;
-            Debug.Assert(connector != null);
-            var buf = connector.WriteBuffer;
-            for (var i = 0; i < _statements.Count; i++)
-            {
-                async = ForceAsyncIfNecessary(async, i);
-
-                var statement = _statements[i];
-                var pStatement = statement.PreparedStatement;
-
-                // A statement may be already prepared, already in preparation (i.e. same statement twice
-                // in the same command), or we can't prepare (overloaded SQL)
-                if (pStatement?.State != PreparedState.ToBePrepared)
-                    continue;
-
-                var statementToClose = pStatement.StatementBeingReplaced;
-                if (statementToClose != null)
+                if (PreparedStatement?.StatementBeingReplaced != null)
                 {
                     // We have a prepared statement that replaces an existing statement - close the latter first.
                     await connector.CloseMessage
-                        .Populate(StatementOrPortal.Statement, statementToClose.Name)
+                        .Populate(StatementOrPortal.Statement, PreparedStatement.StatementBeingReplaced.Name)
                         .Write(buf, async);
                 }
 
                 await connector.ParseMessage
-                    .Populate(statement.SQL, pStatement.Name, statement.InputParameters, connector.TypeMapper)
+                    .Populate(RawCommandText, StatementName, Parameters, connector.TypeMapper)
                     .Write(buf, async);
+            }
 
+            var bind = connector.BindMessage;
+            bind.Populate(Parameters, "", StatementName);
+            if (AllResultTypesAreUnknown)
+                bind.AllResultTypesAreUnknown = AllResultTypesAreUnknown;
+            //else if (i == 0 && UnknownResultTypeList != null)
+            //    bind.UnknownResultTypeList = UnknownResultTypeList;
+            await connector.BindMessage.Write(buf, async);
+
+            if (PreparedStatement == null || PreparedStatement.State == PreparedState.ToBePrepared)
+            {
                 await connector.DescribeMessage
-                    .Populate(StatementOrPortal.Statement, pStatement.Name)
+                    .Populate(StatementOrPortal.Portal)
                     .Write(buf, async);
-
-                pStatement.State = PreparedState.BeingPrepared;
+                if (PreparedStatement != null)
+                    PreparedStatement.State = PreparedState.BeingPrepared;
             }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
-            CleanupSend();
-        }
 
-        bool ForceAsyncIfNecessary(bool async, int numberOfStatementInBatch)
-        {
-            if (!async && FlushOccurred && numberOfStatementInBatch > 0)
-            {
-                // We're synchronously sending the non-first statement in a batch and a flush
-                // has already occured. Switch to async. See long comment in Execute() above.
-                async = true;
-                SynchronizationContext.SetSynchronizationContext(SingleThreadSynchronizationContext);
-            }
-            return async;
-        }
-
-        async Task SendClose(bool async)
-        {
-            BeginSend();
-            var connector = Connection.Connector;
-            Debug.Assert(connector != null);
-
-            var buf = connector.WriteBuffer;
-            foreach (var statement in _statements.Where(s => s.IsPrepared))
-            {
-                if (FlushOccurred)
-                {
-                    async = true;
-                    SynchronizationContext.SetSynchronizationContext(SingleThreadSynchronizationContext);
-                }
-
-                await connector.CloseMessage
-                    .Populate(StatementOrPortal.Statement, statement.StatementName)
-                    .Write(buf, async);
-                Debug.Assert(statement.PreparedStatement != null);
-                statement.PreparedStatement.State = PreparedState.BeingUnprepared;
-            }
-            await SyncMessage.Instance.Write(buf, async);
-            await buf.Flush(async);
-            CleanupSend();
+            await ExecuteMessage.DefaultExecute.Write(buf, async);
         }
 
         #endregion
@@ -1102,39 +955,22 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// <summary>
         /// Executes the command text against the connection.
         /// </summary>
-        [NotNull]
-        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => ExecuteDbDataReader(behavior, false, CancellationToken.None).GetAwaiter().GetResult();
+        //[NotNull]
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+            => ExecuteDbDataReader(behavior, false, CancellationToken.None).GetAwaiter().GetResult();
 
         async ValueTask<DbDataReader> ExecuteDbDataReader(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
             var connector = CheckReadyAndGetConnector();
+            Preprocess(connector);
+
             connector.StartUserAction(this);
             try
             {
-                using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd).Cancel(), this))
+                using (cancellationToken.Register(cmdSet => ((NpgsqlCommandSet)cmdSet).Cancel(), this))
                 {
-                    ValidateParameters();
-
-                    if (IsExplicitlyPrepared)
-                    {
-                        Debug.Assert(_connectorPreparedOn != null);
-                        if (_connectorPreparedOn != Connection.Connector)
-                        {
-                            // The command was prepared, but since then the connector has changed. Detach all prepared statements.
-                            foreach (var s in _statements)
-                                s.PreparedStatement = null;
-                            ResetExplicitPreparation();
-                            ProcessRawQuery();
-                        }
-                    }
-                    else
-                        ProcessRawQuery();
-
-                    State = CommandState.InProgress;
-
                     if (Log.IsEnabled(NpgsqlLogLevel.Debug))
                         LogCommand();
-                    Task sendTask;
 
                     // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
                     lock (connector.CancelLock) { }
@@ -1145,6 +981,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     {
                         if (connector.Settings.MaxAutoPrepare > 0)
                         {
+                            throw new NotImplementedException();
+                            /*)
                             foreach (var statement in _statements)
                             {
                                 // If this statement isn't prepared, see if it gets implicitly prepared.
@@ -1156,34 +994,21 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                                     statement.PreparedStatement.LastUsed = DateTime.UtcNow;
                             }
                             _connectorPreparedOn = connector;
+                            */
                         }
 
-                        // We do not wait for the entire send to complete before proceeding to reading -
-                        // the sending continues in parallel with the user's reading. Waiting for the
-                        // entire send to complete would trigger a deadlock for multi-statement commands,
-                        // where PostgreSQL sends large results for the first statement, while we're sending large
-                        // parameter data for the second. See #641.
-                        // Instead, all sends for non-first statements and for non-first buffers are performed
-                        // asynchronously (even if the user requested sync), in a special synchronization context
-                        // to prevents a dependency on the thread pool (which would also trigger deadlocks).
-                        // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
-                        // send functions can switch to the special async mode when needed.
-                        sendTask = SendExecute(async);
+                        await WriteExecuteSingle(connector, async);
+                        await SyncMessage.Instance.Write(connector.WriteBuffer, async);
+                        await connector.WriteBuffer.Flush(async);
                     }
                     else
                     {
-                        sendTask = SendExecuteSchemaOnly(async);
+                        throw new NotImplementedException();
+                        //sendTask = SendExecuteSchemaOnly(async);
                     }
 
-                    // The following is a hack. It raises an exception if one was thrown in the first phases
-                    // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
-                    // still happen later and aren't properly handled. See #1323.
-                    if (sendTask.IsFaulted)
-                        sendTask.GetAwaiter().GetResult();
-
-                    //var reader = new NpgsqlDataReader(this, behavior, _statements, sendTask);
                     var reader = connector.DataReader;
-                    reader.Init(this, behavior, _statements, sendTask);
+                    reader.Init(Connection, this, behavior);
                     connector.CurrentReader = reader;
                     if (async)
                         await reader.NextResultAsync(cancellationToken);
@@ -1194,14 +1019,51 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
             catch
             {
-                State = CommandState.Idle;
                 Connection.Connector?.EndUserAction();
 
                 // Close connection if requested even when there is an error.
                 if ((behavior & CommandBehavior.CloseConnection) == CommandBehavior.CloseConnection)
-                    _connection.Close();
+                    Connection.Close();
                 throw;
             }
+        }
+
+        internal void Preprocess(NpgsqlConnector connector)
+        {
+            if (Parameters.Count > 65535)
+                throw new Exception("A command cannot have more than 65535 parameters");
+
+            for (var i = 0; i < Parameters.Count; i++)
+            {
+                var p = Parameters[i];
+                switch (p.Direction)
+                {
+                case ParameterDirection.InputOutput:
+                case ParameterDirection.Output:
+                    if (CommandType != CommandType.StoredProcedure)
+                        throw new NotSupportedException("Only commands with type StoredProcedure can have out parameters.");
+                    continue;
+                case ParameterDirection.ReturnValue:
+                    throw new NotSupportedException("Parameters with direction ReturnValue are not supported.");
+                }
+                p.Bind(connector.TypeMapper);
+                p.LengthCache?.Clear();
+                p.ValidateAndGetLength();
+            }
+
+            if (IsExplicitlyPrepared)
+            {
+                Debug.Assert(_connectorPreparedOn != null);
+                if (_connectorPreparedOn != Connection.Connector)
+                {
+                    // The command was prepared, but since then the connector has changed. Detach all prepared statements.
+                    PreparedStatement = null;
+                    _connectorPreparedOn = null;
+                    ProcessCommandText(connector.Settings.RawSqlMode);
+                }
+            }
+            else
+                ProcessCommandText(connector.Settings.RawSqlMode);
         }
 
         #endregion
@@ -1250,9 +1112,6 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             if (connector == null)
                 return;
 
-            if (State != CommandState.InProgress)
-                return;
-
             connector.CancelRequest();
         }
 
@@ -1265,11 +1124,11 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// </summary>
         protected override void Dispose(bool disposing)
         {
-            if (State == CommandState.Disposed)
+            if (_isDisposed)
                 return;
             Transaction = null;
             Connection = null;
-            State = CommandState.Disposed;
+            _isDisposed = true;
             base.Dispose(disposing);
         }
 
@@ -1292,6 +1151,13 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 rowDescription[i].FormatCode = (UnknownResultTypeList == null || !isFirst ? AllResultTypesAreUnknown : UnknownResultTypeList[i]) ? FormatCode.Text : FormatCode.Binary;
         }
 
+        internal void ApplyCommandComplete(CommandCompleteMessage msg)
+        {
+            StatementType = msg.StatementType;
+            Rows = msg.Rows;
+            OID = msg.OID;
+        }
+
         void LogCommand()
         {
             var sb = new StringBuilder();
@@ -1307,6 +1173,17 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
 
             Log.Debug(sb.ToString(), Connection.Connector.Id);
+        }
+
+        internal void Reset()
+        {
+            CommandText = string.Empty;
+            StatementType = StatementType.Select;
+            _description = null;
+            Rows = 0;
+            OID = 0;
+            Parameters.Clear();
+            PreparedStatement = null;
         }
 
         /// <summary>
@@ -1333,7 +1210,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         NpgsqlConnector CheckReadyAndGetConnector()
         {
-            if (State == CommandState.Disposed)
+            if (_isDisposed)
                 throw new ObjectDisposedException(GetType().FullName);
             if (Connection == null)
                 throw new InvalidOperationException("Connection property has not been initialized.");

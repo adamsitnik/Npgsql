@@ -1113,6 +1113,24 @@ namespace Npgsql
         }
         bool _loadTableComposites;
 
+        /// <summary>
+        /// Enables raw SQL mode, where Npgsql doesn't rewrite SQL for parameter placeholders or batching.
+        /// </summary>
+        [Category("Advanced")]
+        [Description("Enables raw SQL mode, where Npgsql doesn't rewrite SQL for parameter placeholders or batching.")]
+        [DisplayName("Raw SQL Mode")]
+        [NpgsqlConnectionStringProperty]
+        public bool RawSqlMode
+        {
+            get => _rawSqlMode;
+            set
+            {
+                _rawSqlMode = value;
+                SetValue(nameof(RawSqlMode), value);
+            }
+        }
+        bool _rawSqlMode;
+
         #endregion
 
         #region Properties - Compatibility

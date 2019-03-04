@@ -126,10 +126,10 @@ namespace Npgsql
             }
 
             WritePosition = 0;
-            if (CurrentCommand != null)
+            if (CurrentCommandSet != null)
             {
-                CurrentCommand.FlushOccurred = true;
-                CurrentCommand = null;
+                CurrentCommandSet.FlushOccurred = true;
+                CurrentCommandSet = null;
             }
             if (_copyMode)
                 WriteCopyDataHeader();
@@ -138,7 +138,7 @@ namespace Npgsql
         internal void Flush() => Flush(false).GetAwaiter().GetResult();
 
         [CanBeNull]
-        internal NpgsqlCommand CurrentCommand { get; set; }
+        internal NpgsqlCommandSet CurrentCommandSet { get; set; }
 
         internal void DirectWrite(byte[] buffer, int offset, int count)
         {

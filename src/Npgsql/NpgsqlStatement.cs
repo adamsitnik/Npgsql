@@ -12,7 +12,7 @@ namespace Npgsql
     /// Npgsql will analyze that property and constructed instances of <see cref="NpgsqlStatement"/>
     /// internally.
     ///
-    /// Users can retrieve instances from <see cref="NpgsqlDataReader.Statements"/>
+    /// Users can retrieve instances from <see cref="NpgsqlDataReader.Commands"/>
     /// and access information about statement execution (e.g. affected rows).
     /// </summary>
     public sealed class NpgsqlStatement

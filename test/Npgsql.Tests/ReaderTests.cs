@@ -150,6 +150,7 @@ namespace Npgsql.Tests
             }
         }
 
+        /*
         [Test]
         public void Statements()
         {
@@ -164,34 +165,35 @@ namespace Npgsql.Tests
                     )
                 using (var reader = cmd.ExecuteReader(Behavior))
                 {
-                    Assert.That(reader.Statements, Has.Count.EqualTo(2));
-                    Assert.That(reader.Statements[0].SQL, Is.EqualTo("INSERT INTO data (name) VALUES ('a')"));
-                    Assert.That(reader.Statements[0].StatementType, Is.EqualTo(StatementType.Insert));
-                    Assert.That(reader.Statements[0].Rows, Is.EqualTo(1));
-                    Assert.That(reader.Statements[0].OID, Is.Not.EqualTo(0));
-                    Assert.That(reader.Statements[1].SQL,
+                    Assert.That(reader.Commands, Has.Count.EqualTo(2));
+                    Assert.That(reader.Commands[0].SQL, Is.EqualTo("INSERT INTO data (name) VALUES ('a')"));
+                    Assert.That(reader.Commands[0].StatementType, Is.EqualTo(StatementType.Insert));
+                    Assert.That(reader.Commands[0].Rows, Is.EqualTo(1));
+                    Assert.That(reader.Commands[0].OID, Is.Not.EqualTo(0));
+                    Assert.That(reader.Commands[1].SQL,
                         Is.EqualTo("UPDATE data SET name='b' WHERE name='doesnt_exist'"));
-                    Assert.That(reader.Statements[1].StatementType, Is.EqualTo(StatementType.Update));
-                    Assert.That(reader.Statements[1].Rows, Is.EqualTo(0));
-                    Assert.That(reader.Statements[1].OID, Is.EqualTo(0));
+                    Assert.That(reader.Commands[1].StatementType, Is.EqualTo(StatementType.Update));
+                    Assert.That(reader.Commands[1].Rows, Is.EqualTo(0));
+                    Assert.That(reader.Commands[1].OID, Is.EqualTo(0));
                 }
 
                 using (var cmd = new NpgsqlCommand("SELECT name FROM data; DELETE FROM data", conn))
                 using (var reader = cmd.ExecuteReader(Behavior))
                 {
                     reader.NextResult(); // Consume SELECT result set
-                    Assert.That(reader.Statements, Has.Count.EqualTo(2));
-                    Assert.That(reader.Statements[0].SQL, Is.EqualTo("SELECT name FROM data"));
-                    Assert.That(reader.Statements[0].StatementType, Is.EqualTo(StatementType.Select));
-                    Assert.That(reader.Statements[0].Rows, Is.EqualTo(1));
-                    Assert.That(reader.Statements[0].OID, Is.EqualTo(0));
-                    Assert.That(reader.Statements[1].SQL, Is.EqualTo("DELETE FROM data"));
-                    Assert.That(reader.Statements[1].StatementType, Is.EqualTo(StatementType.Delete));
-                    Assert.That(reader.Statements[1].Rows, Is.EqualTo(1));
-                    Assert.That(reader.Statements[1].OID, Is.EqualTo(0));
+                    Assert.That(reader.Commands, Has.Count.EqualTo(2));
+                    Assert.That(reader.Commands[0].SQL, Is.EqualTo("SELECT name FROM data"));
+                    Assert.That(reader.Commands[0].StatementType, Is.EqualTo(StatementType.Select));
+                    Assert.That(reader.Commands[0].Rows, Is.EqualTo(1));
+                    Assert.That(reader.Commands[0].OID, Is.EqualTo(0));
+                    Assert.That(reader.Commands[1].SQL, Is.EqualTo("DELETE FROM data"));
+                    Assert.That(reader.Commands[1].StatementType, Is.EqualTo(StatementType.Delete));
+                    Assert.That(reader.Commands[1].Rows, Is.EqualTo(1));
+                    Assert.That(reader.Commands[1].OID, Is.EqualTo(0));
                 }
             }
         }
+        */
 
         [Test]
         public void GetStringWithParameter()
@@ -632,6 +634,7 @@ namespace Npgsql.Tests
             }
         }
 
+        /*
         [Test, IssueLink("https://github.com/npgsql/npgsql/issues/967")]
         public void NpgsqlExceptionReferencesStatement()
         {
@@ -653,7 +656,7 @@ namespace Npgsql.Tests
                     }
                     catch (PostgresException e)
                     {
-                        Assert.That(e.Statement, Is.SameAs(cmd.Statements[0]));
+                        Assert.That(e.Command, Is.SameAs(cmd.Statements[0]));
                     }
                 }
 
@@ -668,11 +671,12 @@ namespace Npgsql.Tests
                     }
                     catch (PostgresException e)
                     {
-                        Assert.That(e.Statement, Is.SameAs(cmd.Statements[1]));
+                        Assert.That(e.Command, Is.SameAs(cmd.Statements[1]));
                     }
                 }
             }
         }
+        */
 
         [Test]
         public void SchemaOnlyReturnsNoData()

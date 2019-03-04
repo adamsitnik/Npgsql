@@ -171,7 +171,7 @@ namespace Npgsql
 
         // This is used by NpgsqlCommand, but we place it on the connector because only one instance is needed
         // at any one time (per connection).
-        internal SqlQueryParser SqlParser { get; } = new SqlQueryParser();
+        internal SqlRewriter SqlRewriter { get; }
 
         /// <summary>
         /// A lock that's taken while a user action is in progress, e.g. a command being executed.
@@ -192,11 +192,11 @@ namespace Npgsql
         readonly Timer _keepAliveTimer;
 
         /// <summary>
-        /// The command currently being executed by the connector, null otherwise.
+        /// The command or command set currently being executed by the connector, null otherwise.
         /// Used only for concurrent use error reporting purposes.
         /// </summary>
         [CanBeNull]
-        NpgsqlCommand _currentCommand;
+        object _executingCommandOrSet;
 
         /// <summary>
         /// If pooled, the timestamp when this connector was returned to the pool.
@@ -278,6 +278,9 @@ namespace Npgsql
             PostgresParameters = new Dictionary<string, string>();
 
             CancelLock = new object();
+
+            if (!Settings.RawSqlMode)
+                SqlRewriter = new SqlRewriter(UseConformantStrings);
 
             _isKeepAliveEnabled = Settings.KeepAlive > 0;
             if (_isKeepAliveEnabled)
@@ -1413,7 +1416,6 @@ namespace Npgsql
 
             if (CurrentReader != null)
             {
-                CurrentReader.Command.State = CommandState.Idle;
                 try
                 {
                     CurrentReader.Close();
@@ -1434,7 +1436,7 @@ namespace Npgsql
             WriteBuffer = null;
             Connection = null;
             PostgresParameters.Clear();
-            _currentCommand = null;
+            _executingCommandOrSet = null;
 
             if (_isKeepAliveEnabled)
             {
@@ -1571,10 +1573,10 @@ namespace Npgsql
 
         #region Locking
 
-        internal UserAction StartUserAction(NpgsqlCommand command)
-            => StartUserAction(ConnectorState.Executing, command);
+        internal UserAction StartUserAction(object commandOrSet)
+            => StartUserAction(ConnectorState.Executing, commandOrSet);
 
-        internal UserAction StartUserAction(ConnectorState newState=ConnectorState.Executing, NpgsqlCommand command=null)
+        internal UserAction StartUserAction(ConnectorState newState=ConnectorState.Executing, object commandOrSet=null)
         {
             // If keepalive is enabled, we must protect state transitions with a SemaphoreSlim
             // (which itself must be protected by a lock, since its dispose isn't thread-safe).
@@ -1590,7 +1592,7 @@ namespace Npgsql
             {
                 if (!_userLock.Wait(0))
                 {
-                    var currentCommand = _currentCommand;
+                    var currentCommand = _executingCommandOrSet;
                     throw currentCommand == null
                         ? new NpgsqlOperationInProgressException(State)
                         : new NpgsqlOperationInProgressException(currentCommand);
@@ -1626,7 +1628,7 @@ namespace Npgsql
                 case ConnectorState.Waiting:
                 case ConnectorState.Connecting:
                 case ConnectorState.Copy:
-                    var currentCommand = _currentCommand;
+                    var currentCommand = _executingCommandOrSet;
                     throw currentCommand == null
                         ? new NpgsqlOperationInProgressException(State)
                         : new NpgsqlOperationInProgressException(currentCommand);
@@ -1637,7 +1639,7 @@ namespace Npgsql
                 Debug.Assert(IsReady);
                 Log.Trace("Start user action", Id);
                 State = newState;
-                _currentCommand = command;
+                _executingCommandOrSet = commandOrSet;
                 return new UserAction(this);
             }
         }
@@ -1657,7 +1659,7 @@ namespace Npgsql
                     _keepAliveTimer.Change(keepAlive, keepAlive);
 
                     Log.Trace("End user action", Id);
-                    _currentCommand = null;
+                    _executingCommandOrSet = null;
                     _userLock.Release();
                     State = ConnectorState.Ready;
                 }
@@ -1668,7 +1670,7 @@ namespace Npgsql
                     return;
 
                 Log.Trace("End user action", Id);
-                _currentCommand = null;
+                _executingCommandOrSet = null;
                 State = ConnectorState.Ready;
             }
         }

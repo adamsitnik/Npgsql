@@ -54,6 +54,7 @@ Below are the connection string parameters which Npgsql understands.
 
 | Parameter                  | Description                                                  | Default                      |
 |----------------------------|--------------------------------------------------------------|------------------------------|
+| Raw SQL Mode               | Enables raw SQL mode, where Npgsql doesn't rewrite SQL for parameter placeholders or batching. | false |
 | Max Auto Prepare           | The maximum number SQL statements that can be automatically prepared at any given point. Beyond this number the least-recently-used statement will be recycled. Zero disables automatic preparation. | 0 |
 | Auto Prepare Min Usages    | The minimum number of usages an SQL statement is used before it's automatically prepared. | 5 |
 | Use Perf Counters          | Makes Npgsql write performance information about connection use to Windows Performance Counters. [Read the docs](performance.md#performance-counters) for more info.

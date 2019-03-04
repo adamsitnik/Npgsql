@@ -6,14 +6,20 @@ using Npgsql.Util;
 
 namespace Npgsql
 {
-    class SqlQueryParser
+    class SqlRewriter
     {
         readonly Dictionary<string, int> _paramIndexMap = new Dictionary<string, int>();
         readonly StringBuilder _rewrittenSql = new StringBuilder();
+        readonly bool _useConformantStrings;
 
-        List<NpgsqlStatement> _statements;
-        NpgsqlStatement _statement;
-        int _statementIndex;
+        List<NpgsqlCommand> _parsedCommands;
+        NpgsqlCommand _currentParsedCommand;
+        int _commandIndex;
+
+        internal SqlRewriter(bool useConformantStrings)
+        {
+            _useConformantStrings = useConformantStrings;
+        }
 
         /// <summary>
         /// Receives a raw SQL query as passed in by the user, and performs some processing necessary
@@ -21,24 +27,17 @@ namespace Npgsql
         /// This includes doing parameter placeholder processing (@p => $1), and splitting the query
         /// up by semicolons if needed (SELECT 1; SELECT 2)
         /// </summary>
-        /// <param name="sql">Raw user-provided query.</param>
-        /// <param name="standardConformantStrings">Whether the PostgreSQL session is configured to use standard conformant strings.</param>
-        /// <param name="parameters">The parameters configured on the <see cref="NpgsqlCommand"/> of this query
-        /// or an empty <see cref="NpgsqlParameterCollection"/> if deriveParameters is set to true.</param>
-        /// <param name="statements">An empty list to be populated with the statements parsed by this method</param>
-        /// <param name="deriveParameters">A bool indicating whether parameters contains a list of preconfigured parameters or an empty list to be filled with derived parameters.</param>
-        internal void ParseRawQuery(string sql, bool standardConformantStrings, NpgsqlParameterCollection parameters, List<NpgsqlStatement> statements, bool deriveParameters = false)
-            => ParseRawQuery(sql.AsSpan(), standardConformantStrings, parameters, statements, deriveParameters);
-
-        void ParseRawQuery(ReadOnlySpan<char> sql, bool standardConformantStrings, NpgsqlParameterCollection parameters, List<NpgsqlStatement> statements, bool deriveParameters)
+        internal void Rewrite(NpgsqlCommand command, bool deriveParameters = false)
         {
-            Debug.Assert(sql != null);
-            Debug.Assert(statements != null);
-            Debug.Assert(parameters != null);
-            Debug.Assert(deriveParameters == false || parameters.Count == 0);
+            Debug.Assert(command != null);
+            Debug.Assert(deriveParameters == false || command.Parameters.Count == 0);
+            Debug.Assert(!command.Connection.Settings.RawSqlMode);
 
-            _statements = statements;
-            _statementIndex = -1;
+            var sql = command.CommandText.AsSpan();
+            var parameters = command.Parameters;
+            _parsedCommands = command.CommandSet.Commands;
+            _commandIndex = -1;
+
             MoveToNextStatement();
 
             var currCharOfs = 0;
@@ -65,7 +64,7 @@ namespace Npgsql
                 case '-':
                     goto LineCommentBegin;
                 case '\'':
-                    if (standardConformantStrings)
+                    if (_useConformantStrings)
                         goto Quoted;
                     else
                         goto Escaped;
@@ -161,8 +160,8 @@ namespace Npgsql
                         if (!parameter.IsInputDirection)
                             throw new Exception($"Parameter '{paramName}' referenced in SQL but is an out-only parameter");
 
-                        _statement.InputParameters.Add(parameter);
-                        index = _paramIndexMap[paramName] = _statement.InputParameters.Count;
+                        _currentParsedCommand.Parameters.Add(parameter);
+                        index = _paramIndexMap[paramName] = _currentParsedCommand.Parameters.Count;
                     }
                     _rewrittenSql.Append('$');
                     _rewrittenSql.Append(index);
@@ -411,7 +410,7 @@ namespace Npgsql
 
         SemiColon:
             _rewrittenSql.Append(sql.Slice(currTokenBeg, currCharOfs - currTokenBeg - 1));
-            _statement.SQL = _rewrittenSql.ToString();
+            _currentParsedCommand.RawCommandText = _rewrittenSql.ToString();
             while (currCharOfs < end)
             {
                 ch = sql[currCharOfs];
@@ -427,29 +426,28 @@ namespace Npgsql
                     MoveToNextStatement();
                 goto None;
             }
-            if (statements.Count > _statementIndex + 1)
-                statements.RemoveRange(_statementIndex + 1, statements.Count - (_statementIndex + 1));
+            if (_parsedCommands.Count > _commandIndex + 1)
+                _parsedCommands.RemoveRange(_commandIndex + 1, _parsedCommands.Count - (_commandIndex + 1));
             return;
 
         Finish:
             _rewrittenSql.Append(sql.Slice(currTokenBeg, end - currTokenBeg));
-            _statement.SQL = _rewrittenSql.ToString();
-            if (statements.Count > _statementIndex + 1)
-               statements.RemoveRange(_statementIndex + 1, statements.Count - (_statementIndex + 1));
+            _currentParsedCommand.RawCommandText = _rewrittenSql.ToString();
+            if (_parsedCommands.Count > _commandIndex + 1)
+                _parsedCommands.RemoveRange(_commandIndex + 1, _parsedCommands.Count - (_commandIndex + 1));
         }
 
         void MoveToNextStatement()
         {
-            _statementIndex++;
-            if (_statements.Count > _statementIndex)
+            if (_parsedCommands.Count > _commandIndex)
             {
-                _statement = _statements[_statementIndex];
-                _statement.Reset();
+                _currentParsedCommand = _parsedCommands[_commandIndex];
+                _currentParsedCommand.Reset();
             }
             else
             {
-                _statement = new NpgsqlStatement();
-                _statements.Add(_statement);
+                _currentParsedCommand = new NpgsqlCommand();
+                _parsedCommands.Add(_currentParsedCommand);
             }
             _paramIndexMap.Clear();
             _rewrittenSql.Clear();

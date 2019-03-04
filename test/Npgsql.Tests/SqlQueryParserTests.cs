@@ -3,6 +3,7 @@ using System.Data;
 using System.Linq;
 using NUnit.Framework;
 
+#if DISABLED
 namespace Npgsql.Tests
 {
     class SqlQueryParserTests
@@ -176,14 +177,14 @@ namespace Npgsql.Tests
 
         #region Setup / Teardown / Utils
 
-        SqlQueryParser _parser;
+        SqlRewriter _parser;
         List<NpgsqlStatement> _queries;
         NpgsqlParameterCollection _params;
 
         [SetUp]
         public void SetUp()
         {
-            _parser = new SqlQueryParser();
+            _parser = new SqlRewriter();
             _queries = new List<NpgsqlStatement>();
             _params = new NpgsqlParameterCollection();
         }
@@ -191,3 +192,4 @@ namespace Npgsql.Tests
         #endregion
     }
 }
+#endif

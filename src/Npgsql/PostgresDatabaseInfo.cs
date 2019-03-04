@@ -115,8 +115,13 @@ namespace Npgsql
         /// types).
         /// </remarks>
         [NotNull]
-        static string GenerateTypesQuery(bool withRange, bool withEnum, bool withEnumSortOrder, bool loadTableComposites, bool withTypeCategory)
-            => $@"
+        static NpgsqlCommandSet GenerateTypeQueries(bool withRange, bool withEnum, bool withEnumSortOrder, bool loadTableComposites, bool withTypeCategory)
+        {
+            var cmdSet = new NpgsqlCommandSet
+            {
+                Commands =
+                {
+                    new NpgsqlCommand($@"
 /*** Load all supported types ***/
 SELECT ns.nspname, a.typname, a.oid, a.typrelid, a.typbasetype,
 CASE WHEN pg_proc.proname='array_recv' THEN 'a' ELSE a.typtype END AS type,
@@ -148,8 +153,9 @@ WHERE
     (b.typtype = 'c' AND elemcls.relkind='c')  /* Array of user-defined free-standing composites (not table composites) */
   )) OR
   (a.typtype = 'p' AND a.typname IN ('record', 'void'))  /* Some special supported pseudo-types */
-ORDER BY ord;
+ORDER BY ord"),
 
+                    new NpgsqlCommand($@"
 /*** Load field definitions for (free-standing) composite types ***/
 SELECT typ.oid, att.attname, att.atttypid
 FROM pg_type AS typ
@@ -160,15 +166,25 @@ WHERE
   (typ.typtype = 'c' AND {(loadTableComposites ? "ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')" : "cls.relkind='c'")}) AND
   attnum > 0 AND     /* Don't load system attributes */
   NOT attisdropped
-ORDER BY typ.oid, att.attnum;
+ORDER BY typ.oid, att.attnum")
+                }
+            };
 
-{(withEnum ? $@"
+            if (withEnum)
+            {
+                cmdSet.Commands.Add(new NpgsqlCommand($@"
 /*** Load enum fields ***/
 SELECT pg_type.oid, enumlabel
 FROM pg_enum
 JOIN pg_type ON pg_type.oid=enumtypid
-ORDER BY oid{(withEnumSortOrder ? ", enumsortorder" : "")};" : "")}
-";
+ORDER BY oid{(withEnumSortOrder ? ", enumsortorder" : "")}"));
+            }
+
+            foreach (var cmd in cmdSet.Commands)
+                cmd.AllResultTypesAreUnknown = true;
+
+            return cmdSet;
+        }
 
         /// <summary>
         /// Loads type information from the backend specified by <paramref name="conn"/>.
@@ -192,13 +208,11 @@ ORDER BY oid{(withEnumSortOrder ? ", enumsortorder" : "")};" : "")}
                     throw new TimeoutException();
             }
 
-            var typeLoadingQuery = GenerateTypesQuery(SupportsRangeTypes, SupportsEnumTypes, HasEnumSortOrder, conn.Settings.LoadTableComposites, HasTypeCategory);
-
-            using (var command = new NpgsqlCommand(typeLoadingQuery, conn))
+            using (var cmdSet = GenerateTypeQueries(SupportsRangeTypes, SupportsEnumTypes, HasEnumSortOrder, conn.Settings.LoadTableComposites, HasTypeCategory))
             {
-                command.CommandTimeout = commandTimeout;
-                command.AllResultTypesAreUnknown = true;
-                using (var reader = async ? await command.ExecuteReaderAsync() : command.ExecuteReader())
+                cmdSet.Connection = conn;
+                cmdSet.Timeout = commandTimeout;
+                using (var reader = async ? await cmdSet.ExecuteReaderAsync() : cmdSet.ExecuteReader())
                 {
                     var byOID = new Dictionary<uint, PostgresType>();
 

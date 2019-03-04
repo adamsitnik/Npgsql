@@ -177,9 +177,9 @@ namespace Npgsql
         }
 
         /// <summary>
-        /// Returns the statement which triggered this exception.
+        /// Returns the command which triggered this exception.
         /// </summary>
-        public NpgsqlStatement Statement { get; internal set; }
+        public NpgsqlCommand Command { get; internal set; }
 
         /// <summary>
         /// Gets a collection of key/value pairs that provide additional PostgreSQL fields about the exception.
