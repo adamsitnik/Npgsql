@@ -140,7 +140,8 @@ namespace Npgsql
         [CanBeNull]
         internal NpgsqlCommand CurrentCommand { get; set; }
 
-        internal void DirectWrite(byte[] buffer, int offset, int count)
+#if NET461
+        internal void DirectWrite(byte[] data, int offset, int count)
         {
             if (_copyMode)
             {
@@ -160,7 +161,7 @@ namespace Npgsql
 
             try
             {
-                Underlying.Write(buffer, offset, count);
+                Underlying.Write(data, offset, count);
             }
             catch (Exception e)
             {
@@ -168,6 +169,36 @@ namespace Npgsql
                 throw new NpgsqlException("Exception while writing to stream", e);
             }
         }
+#else
+        internal void DirectWrite(ReadOnlySpan<byte> data)
+        {
+            if (_copyMode)
+            {
+                // Flush has already written the CopyData header, need to update the length
+                Debug.Assert(WritePosition == 5);
+
+                WritePosition = 1;
+                WriteInt32(data.Length + 4);
+                WritePosition = 5;
+                _copyMode = false;
+                Flush();
+                _copyMode = true;
+                WriteCopyDataHeader();
+            }
+            else
+                Debug.Assert(WritePosition == 0);
+
+            try
+            {
+                Underlying.Write(data);
+            }
+            catch (Exception e)
+            {
+                Connector.Break();
+                throw new NpgsqlException("Exception while writing to stream", e);
+            }
+        }
+#endif
 
         #endregion
 
@@ -352,9 +383,6 @@ namespace Npgsql
             buf.CopyTo(new Span<byte>(Buffer, WritePosition, Buffer.Length - WritePosition));
             WritePosition += buf.Length;
         }
-
-        public void WriteBytes(byte[] buf, int offset, int count)
-            => WriteBytes(new ReadOnlySpan<byte>(buf, offset, count));
 
         public Task WriteBytesRaw(byte[] bytes, bool async)
         {

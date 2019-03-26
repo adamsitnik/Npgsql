@@ -117,6 +117,41 @@ namespace Npgsql
                 throw;
             }
         }
+#if NET461 || NETSTANDARD2_0
+#else
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            CheckDisposed();
+            if (!CanWrite)
+                throw new InvalidOperationException("Stream not open for writing");
+
+            if (count == 0) { return; }
+
+            if (count <= _writeBuf.WriteSpaceLeft)
+            {
+                _writeBuf.WriteBytes(buffer, offset, count);
+                return;
+            }
+
+            try {
+                // Value is too big, flush.
+                Flush();
+
+                if (count <= _writeBuf.WriteSpaceLeft)
+                {
+                    _writeBuf.WriteBytes(buffer, offset, count);
+                    return;
+                }
+
+                // Value is too big even after a flush - bypass the buffer and write directly.
+                _writeBuf.DirectWrite(buffer, offset, count);
+            } catch {
+                _connector.Break();
+                Cleanup();
+                throw;
+            }
+        }
+#endif
 
         public override void Flush()
         {

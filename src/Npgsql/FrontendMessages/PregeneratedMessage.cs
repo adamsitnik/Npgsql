@@ -33,10 +33,7 @@ namespace Npgsql.FrontendMessages
 
         internal override int ResponseMessageCount { get; }
 
-        internal override void WriteFully(NpgsqlWriteBuffer buf)
-        {
-            buf.WriteBytes(_data, 0, _data.Length);
-        }
+        internal override void WriteFully(NpgsqlWriteBuffer buf) => buf.WriteBytes(_data);
 
         public override string ToString() =>  _description ?? "[?]";
 

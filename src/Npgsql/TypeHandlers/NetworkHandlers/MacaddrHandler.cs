@@ -40,10 +40,7 @@ namespace Npgsql.TypeHandlers.NetworkHandlers
 
         /// <inheritdoc />
         public override void Write(PhysicalAddress value, NpgsqlWriteBuffer buf, NpgsqlParameter parameter)
-        {
-            var bytes = value.GetAddressBytes();
-            buf.WriteBytes(bytes, 0, bytes.Length);
-        }
+            => buf.WriteBytes(value.GetAddressBytes());
 
         #endregion Write
     }
