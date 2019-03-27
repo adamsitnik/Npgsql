@@ -46,10 +46,10 @@ namespace Npgsql
         /// </summary>
         internal Encoding RelaxedTextEncoding { get; }
 
-        internal int ReadPosition { get; set; }
-        internal int ReadBytesLeft => FilledBytes - ReadPosition;
+        public int ReadPosition { get; set; }
+        public int ReadBytesLeft => FilledBytes - ReadPosition;
 
-        internal readonly byte[] Buffer;
+        public readonly byte[] Buffer;
         internal int FilledBytes;
 
         [CanBeNull]
