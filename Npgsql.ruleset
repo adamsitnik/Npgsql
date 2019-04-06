@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RuleSet Name="EFCore" ToolsVersion="15.0">
+  <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers">
+    <Rule Id="SA1025" Action="None" />   <!-- Code must not contain multiple whitespace characters in a row -->
+    <Rule Id="SA1101" Action="None" />   <!-- Prefix local calls with this -->
+    <Rule Id="SA1108" Action="None" />   <!-- Block statements must not contain embedded comments -->
+    <Rule Id="SA1124" Action="None" />   <!-- Do not use regions -->
+    <Rule Id="SA1201" Action="None" />   <!-- A field should not follow a property -->
+    <Rule Id="SA1202" Action="None" />   <!-- 'public' members must come before 'private' members -->
+    <Rule Id="SA1204" Action="None" />   <!-- Static members must appear before non-static members -->
+    <Rule Id="SA1309" Action="None" />   <!-- Field '{0}' must not begin with an underscore -->
+    <Rule Id="SA1400" Action="None" />   <!-- Element '{0}' must declare an access modifier -->
+    <Rule Id="SA1401" Action="None" />   <!-- Field must be private -->
+    <Rule Id="SA1405" Action="None" />   <!-- Debug.Assert must provide message text -->
+    <Rule Id="SA1500" Action="None" />   <!-- Braces for multi-line statements must not share line -->
+    <Rule Id="SA1503" Action="None" />   <!-- Braces may not be omitted -->
+    <Rule Id="SA1516" Action="None" />   <!-- Elements must be separated by blank line -->
+    <Rule Id="SA1520" Action="None" />   <!-- Use braces consistently -->
+    <Rule Id="SA1609" Action="None" />   <!-- Property documentation must have a value -->
+    <Rule Id="SA1615" Action="None" />   <!-- Element return value must be documented -->
+    <Rule Id="SA1623" Action="None" />   <!-- Property summary documentation text must begin with: 'Gets' -->
+
+    <!-- TODO -->
+    <Rule Id="SA1611" Action="None" />   <!-- The documentation for parameter '{0}' is missing -->
+  </Rules>
+</RuleSet>
