@@ -60,9 +60,11 @@ namespace Npgsql
         static readonly NpgsqlConnectionStringBuilder DefaultSettings = new NpgsqlConnectionStringBuilder();
 
         [CanBeNull]
-        ConnectorPool _pool;
+        internal ConnectorPool Pool;
 
+#pragma warning disable 649
         bool _wasBroken;
+#pragma warning restore 649
 
         [CanBeNull]
         internal Transaction EnlistedTransaction { get; set; }
@@ -144,9 +146,9 @@ namespace Npgsql
 
         void GetPoolAndSettings()
         {
-            if (PoolManager.TryGetValue(_connectionString, out _pool))
+            if (PoolManager.TryGetValue(_connectionString, out Pool))
             {
-                Settings = _pool.Settings;  // Great, we already have a pool
+                Settings = Pool.Settings;  // Great, we already have a pool
                 return;
             }
 
@@ -168,11 +170,11 @@ namespace Npgsql
             // and recheck.
             var canonical = Settings.ConnectionString;
 
-            if (PoolManager.TryGetValue(canonical, out _pool))
+            if (PoolManager.TryGetValue(canonical, out Pool))
             {
                 // The pool was found, but only under the canonical key - we're using a different version
                 // for the first time. Map it via our own key for next time.
-                _pool = PoolManager.GetOrAdd(_connectionString, _pool);
+                Pool = PoolManager.GetOrAdd(_connectionString, Pool);
                 return;
             }
 
@@ -180,19 +182,21 @@ namespace Npgsql
             // The canonical pool is the 'base' pool so we need to set that up first. If someone beats us to it use what they put.
             // The connection string pool can either be added here or above, if it's added above we should just use that.
             var newPool = new ConnectorPool(Settings, canonical);
-            _pool = PoolManager.GetOrAdd(canonical, newPool);
+            Pool = PoolManager.GetOrAdd(canonical, newPool);
 
-            if (_pool == newPool)
+            if (Pool == newPool)
             {
                 // If the pool we created was the one that ended up being stored we need to increment the appropriate counter.
                 // Avoids a race condition where multiple threads will create a pool but only one will be stored.
                 Counters.NumberOfActiveConnectionPools.Increment();
             }
 
-            _pool = PoolManager.GetOrAdd(_connectionString, _pool);
+            Pool = PoolManager.GetOrAdd(_connectionString, Pool);
         }
 
         Task Open(bool async, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+#if MULTIPLEXING_PILOT
         {
             // This is an optimized path for when a connection can be taken from the pool
             // with no waiting or I/O
@@ -309,6 +313,7 @@ namespace Npgsql
                 OnStateChange(ClosedToOpenEventArgs);
             }
         }
+#endif  // MULTIPLEXING_PILOT
 
         #endregion Open / Init
 
@@ -594,6 +599,7 @@ namespace Npgsql
 
         internal void Close(bool wasBroken)
         {
+            /*
             if (Connector == null)
                 return;
             var connectorId = Connector.Id;
@@ -605,13 +611,13 @@ namespace Npgsql
             if (Settings.Pooling)
             {
                 if (EnlistedTransaction == null)
-                    _pool.Release(Connector);
+                    Pool.Release(Connector);
                 else
                 {
                     // A System.Transactions transaction is still in progress, we need to wait for it to complete.
                     // Close the connection and disconnect it from the resource manager but leave the connector
                     // in a enlisted pending list in the pool.
-                    _pool.AddPendingEnlistedConnector(Connector, EnlistedTransaction);
+                    Pool.AddPendingEnlistedConnector(Connector, EnlistedTransaction);
                     Connector.Connection = null;
                     EnlistedTransaction = null;
                 }
@@ -632,6 +638,7 @@ namespace Npgsql
             Connector = null;
 
             OnStateChange(OpenToClosedEventArgs);
+            */
         }
 
         /// <summary>
@@ -1351,7 +1358,7 @@ namespace Npgsql
 
             Close();
 
-            _pool = null;
+            Pool = null;
             Settings = Settings.Clone();
             Settings.Database = dbName;
             ConnectionString = Settings.ToString();

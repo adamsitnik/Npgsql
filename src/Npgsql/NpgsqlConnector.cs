@@ -1,9 +1,12 @@
 using System;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Mime;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
@@ -16,6 +19,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
+using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using Npgsql.Util;
 using static Npgsql.Util.Statics;
@@ -435,6 +439,11 @@ namespace Npgsql
                 Break();
                 throw;
             }
+
+#pragma warning disable 4014
+            MainReadLoop();
+            MainWriteLoop();
+#pragma warning restore 4014
         }
 
         internal async Task LoadDatabaseInfo(NpgsqlTimeout timeout, bool async)
@@ -832,6 +841,78 @@ namespace Npgsql
         }
 
         #endregion
+
+        #region Main read/write loops
+
+        internal ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)>();
+        internal ConcurrentQueue<TaskCompletionSource<object>> InFlight = new ConcurrentQueue<TaskCompletionSource<object>>();
+        internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
+
+        async Task MainReadLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await ReadBuffer.Ensure(5, true);
+                    if (!InFlight.TryDequeue(out var tcs))
+                        throw new Exception("Got message(s) from PostgreSQL but no command is pending");
+                    ReaderCompleted.Reset();
+                    tcs.SetResult(null);
+                    await ReaderCompleted;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Exception in main read loop", e, Id);
+                Break();
+            }
+        }
+
+        internal SemaphoreSlim WriteSemaphore = new SemaphoreSlim(0);
+
+        async Task MainWriteLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await WriteSemaphore.WaitAsync();
+                    var isFirst = true;
+                    while (Pending.TryDequeue(out var tup))
+                    {
+                        InFlight.Enqueue(tup.Item2);
+                        await tup.Item1.SendExecute(true);
+                        //Interlocked.Increment(ref NumCommandsWritten);
+                        if (isFirst)
+                        {
+                            Thread.Sleep(1);
+                            isFirst = false;
+                        }
+                        else
+                        {
+                            var dequeued = WriteSemaphore.Wait(0);
+                            Debug.Assert(dequeued);
+                        }
+                    }
+
+                    await WriteBuffer.Flush(true);
+                    //Interlocked.Increment(ref NumFlushes);
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Exception in main write loop", e, Id);
+                Break();
+            }
+        }
+
+#pragma warning disable 649
+        internal static int NumCommandsWritten;
+        internal static int NumFlushes;
+#pragma warning restore 649
+
+        #endregion Main read/write loops
 
         #region Frontend message processing
 

@@ -38,7 +38,7 @@ namespace Npgsql
     {
         internal NpgsqlCommand Command { get; private set; }
         internal NpgsqlConnector Connector { get; }
-        NpgsqlConnection _connection;
+        //NpgsqlConnection _connection;
 
         /// <summary>
         /// The behavior of the command with which this reader was executed.
@@ -138,8 +138,7 @@ namespace Npgsql
         internal void Init(NpgsqlCommand command, CommandBehavior behavior, List<NpgsqlStatement> statements, Task sendTask)
         {
             Command = command;
-            Debug.Assert(command.Connection == Connector.Connection);
-            _connection = command.Connection;
+            //Debug.Assert(command.Connection == Connector.Connection);
             _behavior = behavior;
             _isSchemaOnly = _behavior.HasFlag(CommandBehavior.SchemaOnly);
             _isSequential = _behavior.HasFlag(CommandBehavior.SequentialAccess);
@@ -819,10 +818,13 @@ namespace Npgsql
             Connector.CurrentReader = null;
             Connector.EndUserAction();
 
+            Connector.ReaderCompleted.TrySetResult(null);
+
             // If the reader is being closed as part of the connection closing, we don't apply
             // the reader's CommandBehavior.CloseConnection
             if (_behavior.HasFlag(CommandBehavior.CloseConnection) && !connectionClosing)
-                _connection.Close();
+                throw new NotImplementedException();
+                //_connection.Close();
 
             if (ReaderClosed != null)
             {
@@ -1661,8 +1663,9 @@ namespace Npgsql
         /// </summary>
         /// <returns></returns>
         public ReadOnlyCollection<NpgsqlDbColumn> GetColumnSchema()
-            => new DbColumnSchemaGenerator(_connection, RowDescription, _behavior.HasFlag(CommandBehavior.KeyInfo))
-                .GetColumnSchema();
+            => throw new NotImplementedException();
+            //=> new DbColumnSchemaGenerator(_connection, RowDescription, _behavior.HasFlag(CommandBehavior.KeyInfo))
+            //    .GetColumnSchema();
 
 #if !NET461
         ReadOnlyCollection<DbColumn> IDbColumnSchemaGenerator.GetColumnSchema()

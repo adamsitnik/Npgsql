@@ -13,11 +13,14 @@ namespace Npgsql
     class PostgresMinimalDatabaseInfoFactory : INpgsqlDatabaseInfoFactory
     {
         public Task<NpgsqlDatabaseInfo> Load(NpgsqlConnection conn, NpgsqlTimeout timeout, bool async)
+            => Task.FromResult((NpgsqlDatabaseInfo)new PostgresMinimalDatabaseInfo(conn));
+
+        /*
             => Task.FromResult(
                 new NpgsqlConnectionStringBuilder(conn.ConnectionString).ServerCompatibilityMode == ServerCompatibilityMode.NoTypeLoading
                     ? (NpgsqlDatabaseInfo)new PostgresMinimalDatabaseInfo(conn)
                     : null
-            );
+            );*/
     }
 
     class PostgresMinimalDatabaseInfo : PostgresDatabaseInfo

@@ -1183,9 +1183,10 @@ LANGUAGE plpgsql VOLATILE";
         }
 
         static Func<NpgsqlDataReader, int, Task<Stream>> BuildStreamGetter(bool isAsync)
-            => isAsync
-                ? (Func<NpgsqlDataReader, int, Task<Stream>>)((r, index) => r.GetStreamAsync(index))
-                : (r, index) => Task.FromResult(r.GetStream(index));
+            => throw new NotImplementedException();
+            //=> isAsync
+            //    ? (Func<NpgsqlDataReader, int, Task<Stream>>)((r, index) => r.GetStreamAsync(index))
+            //    : (r, index) => Task.FromResult(r.GetStream(index));
 
         #endregion GetBytes / GetStream
 
@@ -1241,8 +1242,10 @@ LANGUAGE plpgsql VOLATILE";
         }
 
         [Test]
-        public async Task GetTextReader([Values(true, false)] bool isAsync)
+        public Task GetTextReader([Values(true, false)] bool isAsync)
         {
+            throw new NotImplementedException();
+#if MULTIPLEXING_PILOT
             Func<NpgsqlDataReader, int, Task<TextReader>> textReaderGetter;
             if (isAsync)
                 textReaderGetter = (r, index) => r.GetTextReaderAsync(index);
@@ -1285,6 +1288,7 @@ LANGUAGE plpgsql VOLATILE";
                     Assert.That(reader.GetString(1), Is.EqualTo("foo"));
                 }
             }
+#endif // MULTIPLEXING_PILOT
         }
 
         [Test]

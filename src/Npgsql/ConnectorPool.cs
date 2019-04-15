@@ -406,7 +406,7 @@ namespace Npgsql
                 return;
             }
 
-            connector.Reset();
+            //connector.Reset();
 
             var sw = new SpinWait();
 

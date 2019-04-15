@@ -135,6 +135,7 @@ namespace Npgsql
             {
                 case PreparedState.Prepared:
                 case PreparedState.ToBePrepared:
+                case PreparedState.BeingPrepared:
                 // The statement has already been prepared (explicitly or automatically), or has been selected
                 // for preparation (earlier identical statement in the same command).
                 // We just need to check that the parameter types correspond, since prepared statements are
@@ -204,7 +205,7 @@ namespace Npgsql
                     return;
                 }
             }
-            Debug.Assert(i < _candidates.Length);
+            //Debug.Assert(i < _candidates.Length);
         }
 
         internal void ClearAll()

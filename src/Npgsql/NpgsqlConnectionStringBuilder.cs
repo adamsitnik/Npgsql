@@ -1047,11 +1047,11 @@ namespace Npgsql
                 if (value < 0)
                     throw new ArgumentOutOfRangeException(nameof(value), value, $"{nameof(MaxAutoPrepare)} cannot be negative");
 
-                _maxAutoPrepare = value;
+                //_maxAutoPrepare = value;
                 SetValue(nameof(MaxAutoPrepare), value);
             }
         }
-        int _maxAutoPrepare;
+        int _maxAutoPrepare = 0;
 
         /// <summary>
         /// The minimum number of usages an SQL statement is used before it's automatically prepared.
