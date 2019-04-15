@@ -1,9 +1,12 @@
 using System;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Mime;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
@@ -16,6 +19,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
+using Npgsql.TypeHandling;
 using Npgsql.TypeMapping;
 using Npgsql.Util;
 using static Npgsql.Util.Statics;
@@ -435,6 +439,10 @@ namespace Npgsql
                 Break();
                 throw;
             }
+
+#pragma warning disable 4014
+            MainReadLoop();
+#pragma warning restore 4014
         }
 
         internal async Task LoadDatabaseInfo(NpgsqlTimeout timeout, bool async)
@@ -832,6 +840,34 @@ namespace Npgsql
         }
 
         #endregion
+
+        #region Main read loop
+
+        internal ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>> PendingReads = new ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>>();
+        internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
+
+        async Task MainReadLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await ReadBuffer.Ensure(5, true);
+                    if (!PendingReads.TryDequeue(out var tcs))
+                        throw new Exception("Got message(s) from PostgreSQL but no command is pending");
+                    ReaderCompleted.Reset();
+                    tcs.SetResult(null);
+                    await ReaderCompleted;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Exception in main read loop", e, Id);
+                Break();
+            }
+        }
+
+        #endregion Main read loop
 
         #region Frontend message processing
 

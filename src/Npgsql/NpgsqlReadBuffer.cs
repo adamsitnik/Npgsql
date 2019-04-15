@@ -49,7 +49,7 @@ namespace Npgsql
         internal int ReadPosition { get; set; }
         internal int ReadBytesLeft => FilledBytes - ReadPosition;
 
-        internal readonly byte[] Buffer;
+        internal byte[] Buffer { get; set; }
         internal int FilledBytes;
 
         [CanBeNull]
@@ -81,6 +81,21 @@ namespace Npgsql
             Underlying = stream;
             Size = size;
             Buffer = new byte[Size];
+            TextEncoding = textEncoding;
+            RelaxedTextEncoding = relaxedTextEncoding;
+        }
+
+        internal NpgsqlReadBuffer(
+            [CanBeNull] NpgsqlConnector connector,
+            Stream stream,
+            byte[] buf,
+            Encoding textEncoding,
+            Encoding relaxedTextEncoding)
+        {
+            Connector = connector;
+            Underlying = stream;
+            Buffer = buf;
+            Size = buf.Length;
             TextEncoding = textEncoding;
             RelaxedTextEncoding = relaxedTextEncoding;
         }

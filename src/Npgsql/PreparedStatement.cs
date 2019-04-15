@@ -80,7 +80,7 @@ namespace Npgsql
 
         internal void SetParamTypes(List<NpgsqlParameter> parameters)
         {
-            Debug.Assert(HandlerParamTypes == null);
+            //Debug.Assert(HandlerParamTypes == null);
             if (parameters.Count == 0)
             {
                 HandlerParamTypes = EmptyParamTypes;

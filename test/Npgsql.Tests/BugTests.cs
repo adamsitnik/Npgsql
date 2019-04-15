@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -8,6 +9,7 @@ using System.Threading.Tasks;
 using NpgsqlTypes;
 using NUnit.Framework;
 using System.Transactions;
+using Npgsql.Util;
 
 namespace Npgsql.Tests
 {
@@ -424,6 +426,136 @@ namespace Npgsql.Tests
                     conn.ReloadTypes();
                 }
             }
+        }
+
+        [Test]
+        public void MultiplexingPilotTestSync()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                MaxPoolSize = 1,
+                MaxAutoPrepare = 20,
+                AutoPrepareMinUsages = 5
+            };
+
+            using (var conn = OpenConnection(connString))
+            {
+                conn.ExecuteNonQuery("DROP TABLE IF EXISTS data");
+                conn.ExecuteNonQuery("CREATE TABLE data (name TEXT)");
+                for (var i = 0; i < 2; i++)
+                    using (var cmd = new NpgsqlCommand("INSERT INTO data (name) VALUES ('John')", conn))
+                        Assert.That(cmd.ExecuteNonQuery(), Is.EqualTo(1));
+
+                for (var i = 0; i < 100; i++)
+                    using (var cmd2 = new NpgsqlCommand("SELECT * FROM data", conn))
+                    using (var reader = cmd2.ExecuteReader())
+                        while (reader.Read()) {}
+                            //Console.WriteLine("Row: " + reader.GetString(0));
+            }
+        }
+
+        [Test]
+        public async Task MultiplexingPilotTestAsync()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                MaxPoolSize = 1,
+                MaxAutoPrepare = 20,
+                AutoPrepareMinUsages = 5
+            };
+
+            using (var conn = OpenConnection(connString))
+            {
+                conn.ExecuteNonQuery("DROP TABLE IF EXISTS data");
+                conn.ExecuteNonQuery("CREATE TABLE data (name TEXT)");
+                for (var i = 0; i < 2; i++)
+                    using (var cmd = new NpgsqlCommand("INSERT INTO data (name) VALUES ('John')", conn))
+                        Assert.That(await cmd.ExecuteNonQueryAsync(), Is.EqualTo(1));
+
+                for (var i = 0; i < 100; i++)
+                    using (var cmd2 = new NpgsqlCommand("SELECT * FROM data", conn))
+                    using (var reader = await cmd2.ExecuteReaderAsync())
+                        while (await reader.ReadAsync()) {}
+                            //Console.WriteLine("Row: " + reader.GetString(0));
+            }
+        }
+
+        [Test]
+        public async Task MultiplexingPilotConcurrentTestSync()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                MaxPoolSize = 1,
+                MaxAutoPrepare = 20,
+                AutoPrepareMinUsages = 5
+            }.ToString();
+
+            using (var conn = OpenConnection(connString))
+            {
+                conn.ExecuteNonQuery("DROP TABLE IF EXISTS data");
+                conn.ExecuteNonQuery("CREATE TABLE data (name TEXT)");
+            }
+
+            await Task.WhenAll(Enumerable
+                .Range(0, 20)
+                .Select(t => Task.Run(() =>
+                {
+                    var sum = 0;
+                    for (var i = 0; i < 1000; i++)
+                    {
+                        using (var conn = new NpgsqlConnection(connString))
+                        {
+                            conn.Open();
+                            using (var cmd = new NpgsqlCommand("SELECT name FROM data", conn))
+                            using (var reader = cmd.ExecuteReader())
+                                while (reader.Read())
+                                    unchecked
+                                    {
+                                        sum += reader.GetString(0).Length;
+                                    }
+                        }
+                    }
+                    return sum;
+                })));
+        }
+
+        [Test]
+        public async Task MultiplexingPilotConcurrentTestAsync()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                MaxPoolSize = 1,
+                MaxAutoPrepare = 20,
+                //AutoPrepareMinUsages = 5
+            }.ToString();
+
+            using (var conn = OpenConnection(connString))
+            {
+                conn.ExecuteNonQuery("DROP TABLE IF EXISTS data");
+                conn.ExecuteNonQuery("CREATE TABLE data (name TEXT)");
+            }
+
+            await Task.WhenAll(Enumerable
+                .Range(0, 20)
+                .Select(t => Task.Run(async () =>
+                {
+                    var sum = 0;
+                    for (var i = 0; i < 1000; i++)
+                    {
+                        using (var conn = new NpgsqlConnection(connString))
+                        {
+                            await conn.OpenAsync();
+                            using (var cmd = new NpgsqlCommand("SELECT name FROM data", conn))
+                            using (var reader = await cmd.ExecuteReaderAsync())
+                                while (await reader.ReadAsync())
+                                    unchecked
+                                    {
+                                        sum += reader.GetString(0).Length;
+                                    }
+                        }
+                    }
+                    return sum;
+                })));
         }
 
         #region Bug1285
