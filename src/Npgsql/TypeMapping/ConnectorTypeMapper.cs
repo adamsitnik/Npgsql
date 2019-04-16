@@ -380,20 +380,12 @@ namespace Npgsql.TypeMapping
                 ? NpgsqlDbType.Range | elementNpgsqlDbType.Value
                 : (NpgsqlDbType?)null;
 
+            // We only want to bind supported range CLR types whose element CLR types are being bound as well.
+            var clrTypes = rangeHandler.SupportedElementClrTypes
+                .Where(t => elementClrTypes.Contains(t.GenericTypeArguments[0]))
+                .ToList();
 
-            Type[]? clrTypes = null;
-            if (elementClrTypes != null)
-            {
-                // Somewhat hacky. Although the element may have more than one CLR mapping,
-                // its range will only be mapped to the "main" one for now.
-                var defaultElementType = elementHandler.GetFieldType();
-
-                clrTypes = elementClrTypes.Contains(defaultElementType)
-                    ? new[] { rangeHandler.GetFieldType() }
-                    : null;
-            }
-
-            BindType(rangeHandler, pgRangeType, rangeNpgsqlDbType, null, clrTypes);
+            BindType((NpgsqlTypeHandler)rangeHandler, pgRangeType, rangeNpgsqlDbType, null, clrTypes.ToArray());
         }
 
         #endregion Binding
