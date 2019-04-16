@@ -9,14 +9,6 @@ using NpgsqlTypes;
 
 namespace Npgsql.TypeHandlers
 {
-    public abstract class RangeHandler : NpgsqlTypeHandler
-    {
-        protected RangeHandler(PostgresType rangePostgresType) : base(rangePostgresType) {}
-
-        public override RangeHandler CreateRangeHandler(PostgresRangeType rangeBackendType)
-            => throw new NotSupportedException();
-    }
-
     /// <summary>
     /// Type handler for PostgreSQL range types
     /// </summary>
@@ -25,7 +17,7 @@ namespace Npgsql.TypeHandlers
     /// http://www.postgresql.org/docs/current/static/rangetypes.html
     /// </remarks>
     /// <typeparam name="TElement">the range subtype</typeparam>
-    public class RangeHandler<TElement> : RangeHandler, INpgsqlTypeHandler<NpgsqlRange<TElement>>
+    public class RangeHandler<TElement> : NpgsqlTypeHandler<NpgsqlRange<TElement>>
     {
         /// <summary>
         /// The type handler for the element that this range type holds
@@ -41,6 +33,9 @@ namespace Npgsql.TypeHandlers
 
         internal override Type GetFieldType(FieldDescription? fieldDescription = null) => typeof(NpgsqlRange<TElement>);
         internal override Type GetProviderSpecificFieldType(FieldDescription? fieldDescription = null) => typeof(NpgsqlRange<TElement>);
+
+        public override NpgsqlTypeHandler CreateRangeHandler(PostgresType rangeBackendType)
+            => throw new NotSupportedException();
 
         #region Read
 
@@ -66,7 +61,7 @@ namespace Npgsql.TypeHandlers
             => Read(buf, len, false, fieldDescription).Result;
 
 #pragma warning disable CS8653
-        public async ValueTask<NpgsqlRange<TElement>> Read(NpgsqlReadBuffer buf, int len, bool async, FieldDescription? fieldDescription = null)
+        public override async ValueTask<NpgsqlRange<TElement>> Read(NpgsqlReadBuffer buf, int len, bool async, FieldDescription? fieldDescription)
         {
             await buf.Ensure(1, async);
 
@@ -91,15 +86,7 @@ namespace Npgsql.TypeHandlers
 
         #region Write
 
-        protected internal override int ValidateAndGetLength<TAny>(TAny value, ref NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter)
-            => this is INpgsqlTypeHandler<TAny> typedHandler
-                ? typedHandler.ValidateAndGetLength(value, ref lengthCache, parameter)
-                : throw new InvalidCastException($"Can't write CLR type {typeof(TAny)} to database type {PgDisplayName}");
-
-        protected internal override int ValidateObjectAndGetLength(object value, ref NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter)
-            => ValidateAndGetLength((NpgsqlRange<TElement>)value, ref lengthCache, parameter);
-
-        public int ValidateAndGetLength(NpgsqlRange<TElement> value, ref NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter)
+        public override int ValidateAndGetLength(NpgsqlRange<TElement> value, ref NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter)
         {
             var totalLen = 1;
             var lengthCachePos = lengthCache?.Position ?? 0;
@@ -159,14 +146,7 @@ namespace Npgsql.TypeHandlers
             }
         }
 
-        // The default WriteObjectWithLength casts the type handler to INpgsqlTypeHandler<T>, but that's not sufficient for
-        // us (need to handle many types of T, e.g. int[], int[,]...)
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter, bool async)
-            => value == null || value is DBNull
-                ? WriteWithLengthInternal(DBNull.Value, buf, lengthCache, parameter, async)
-                : WriteWithLengthInternal((NpgsqlRange<TElement>)value, buf, lengthCache, parameter, async);
-
-        public async Task Write(NpgsqlRange<TElement> value, NpgsqlWriteBuffer buf, NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter, bool async)
+        public override async Task Write(NpgsqlRange<TElement> value, NpgsqlWriteBuffer buf, NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter, bool async)
         {
             if (buf.WriteSpaceLeft < 1)
                 await buf.Flush(async);
