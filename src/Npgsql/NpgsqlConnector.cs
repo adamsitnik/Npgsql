@@ -878,12 +878,15 @@ namespace Npgsql
                 while (true)
                 {
                     await WriteAvailable;
-                    while (PendingWrites.TryDequeue(out var cmd))
-                        await cmd.SendExecute(true);
                     WriteAvailable.Reset();
                     while (PendingWrites.TryDequeue(out var cmd))
+                    {
                         await cmd.SendExecute(true);
+                        Interlocked.Increment(ref NumCommandsWritten);
+                    }
+
                     await WriteBuffer.Flush(true);
+                    Interlocked.Increment(ref NumFlushes);
                 }
             }
             catch (Exception e)
@@ -892,6 +895,9 @@ namespace Npgsql
                 Break();
             }
         }
+
+        static internal int NumCommandsWritten;
+        static internal int NumFlushes;
 
         #endregion Main read/write loops
 
