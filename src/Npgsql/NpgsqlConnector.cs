@@ -442,8 +442,8 @@ namespace Npgsql
 
 #pragma warning disable 4014
             MainReadLoop();
-            MainWriteLoop();
 #pragma warning restore 4014
+            new Thread(() => MainWriteLoop().Wait()).Start();
         }
 
         internal async Task LoadDatabaseInfo(NpgsqlTimeout timeout, bool async)
@@ -844,7 +844,8 @@ namespace Npgsql
 
         #region Main read/write loops
 
-        internal ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)>();
+        internal BlockingCollection<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new BlockingCollection<(NpgsqlCommand, TaskCompletionSource<object>)>();
+        //internal ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)>();
         internal ConcurrentQueue<TaskCompletionSource<object>> InFlight = new ConcurrentQueue<TaskCompletionSource<object>>();
         internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
 
@@ -871,9 +872,42 @@ namespace Npgsql
             }
         }
 
-        internal ConcurrentQueue<NpgsqlCommand> PendingWrites = new ConcurrentQueue<NpgsqlCommand>();
-        internal ReusableAwaiter<object> WriteAvailable { get; } = new ReusableAwaiter<object>();
+        //internal ReusableAwaiter<object> WriteAvailable { get; } = new ReusableAwaiter<object>();
 
+        async Task MainWriteLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    var tup1 = Pending.Take();
+                    FileCrap.Write($"{Id}:{tup1.Item1.CommandNum} Before send execute");
+                    InFlight.Enqueue(tup1.Item2);
+                    await tup1.Item1.SendExecute(true);
+                    //Interlocked.Increment(ref NumCommandsWritten);
+
+                    while (Pending.TryTake(out var tup2))
+                    {
+                        FileCrap.Write($"{Id}:{tup2.Item1.CommandNum} Before send execute");
+                        InFlight.Enqueue(tup2.Item2);
+                        await tup2.Item1.SendExecute(true);
+                        //Interlocked.Increment(ref NumCommandsWritten);
+                    }
+
+                    FileCrap.Write($"{Id} Flush");
+                    await WriteBuffer.Flush(true);
+                    //Interlocked.Increment(ref NumFlushes);
+                }
+            }
+            catch (Exception e)
+            {
+                FileCrap.Write("WRITE exception: " + e);
+                Log.Error("Exception in main write loop", e, Id);
+                Break();
+            }
+        }
+
+        /*
         async Task MainWriteLoop()
         {
             try
@@ -901,7 +935,7 @@ namespace Npgsql
                 Log.Error("Exception in main write loop", e, Id);
                 Break();
             }
-        }
+        }*/
 
 #pragma warning disable 649
         internal static int NumCommandsWritten;

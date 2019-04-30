@@ -1161,8 +1161,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                     FileCrap.Write($"{connector.Id}:{CommandNum} Before enqueue");
                     var tcs = new TaskCompletionSource<object>();
-                    connector.Pending.Enqueue((this, tcs));
-                    connector.WriteAvailable.TrySetResult(null);
+                    //connector.Pending.Enqueue((this, tcs));
+                    connector.Pending.Add((this, tcs));
+                    //connector.WriteAvailable.TrySetResult(null);
                     if ((behavior & CommandBehavior.SchemaOnly) == 0)
                     {
                         if (connector.Settings.MaxAutoPrepare > 0)
