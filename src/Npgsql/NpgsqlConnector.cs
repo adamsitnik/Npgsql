@@ -442,6 +442,7 @@ namespace Npgsql
 
 #pragma warning disable 4014
             MainReadLoop();
+            MainWriteLoop();
 #pragma warning restore 4014
         }
 
@@ -841,7 +842,7 @@ namespace Npgsql
 
         #endregion
 
-        #region Main read loop
+        #region Main read/write loops
 
         internal ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>> PendingReads = new ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>>();
         internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
@@ -867,7 +868,40 @@ namespace Npgsql
             }
         }
 
-        #endregion Main read loop
+        internal ConcurrentQueue<NpgsqlCommand> PendingWrites = new ConcurrentQueue<NpgsqlCommand>();
+        internal ReusableAwaiter<object> WriteAvailable { get; } = new ReusableAwaiter<object>();
+
+        async Task MainWriteLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await WriteAvailable;
+                    WriteAvailable.Reset();
+                    while (PendingWrites.TryDequeue(out var cmd))
+                    {
+                        await cmd.SendExecute(true);
+                        //Interlocked.Increment(ref NumCommandsWritten);
+                    }
+
+                    await WriteBuffer.Flush(true);
+                    //Interlocked.Increment(ref NumFlushes);
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Exception in main write loop", e, Id);
+                Break();
+            }
+        }
+
+#pragma warning disable 649
+        internal static int NumCommandsWritten;
+        internal static int NumFlushes;
+#pragma warning restore 649
+
+        #endregion Main read/write loops
 
         #region Frontend message processing
 

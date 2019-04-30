@@ -556,6 +556,10 @@ namespace Npgsql.Tests
                     }
                     return sum;
                 })));
+
+            if (NpgsqlConnector.NumFlushes > 0)
+                Console.WriteLine($"{NpgsqlConnector.NumCommandsWritten} commands written in {NpgsqlConnector.NumFlushes} flushes, " + "" +
+                                  $"avg {NpgsqlConnector.NumCommandsWritten/NpgsqlConnector.NumFlushes} cmds/flush");
         }
 
         #region Bug1285
