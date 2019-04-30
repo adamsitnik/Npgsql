@@ -805,7 +805,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 SynchronizationContext.SetSynchronizationContext(null);
         }
 
-        async Task SendExecute(bool async)
+        internal async Task SendExecute(bool async)
         {
             BeginSend();
             var connector = Connection.Connector;
@@ -843,7 +843,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
 
             await connector.WriteSync(async);
-            await connector.Flush(async);
+            //await connector.Flush(async);
             CleanupSend();
         }
 
@@ -1125,7 +1125,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                     if (Log.IsEnabled(NpgsqlLogLevel.Debug))
                         LogCommand();
-                    Task sendTask;
+                    //Task sendTask;
 
                     // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
                     //lock (connector.CancelLock) { }
@@ -1166,16 +1166,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                         // Multiplexing pilot: for now, complete all writing before unlocking the connection for further
                         // writes. This means we may deadlock on big batches and compromise perf. In a real implementation
                         // we'd probably support writing the next command before the previous one completed (via pipelines?)
-                        sendTask = SendExecute(async);
-                        // TODO: Make sure writing is done before we release the connection, otherwise it could interleave
-                        // with another write. If we serialize writing via a queue (for coalescing this can be removed).
-                        await sendTask;
+                        //sendTask = SendExecute(async);
                     }
                     else
                     {
-                        sendTask = SendExecuteSchemaOnly(async);
+                        throw new NotImplementedException();
+                        //sendTask = SendExecuteSchemaOnly(async);
                     }
 
+                    connector.PendingWrites.Enqueue(this);
+                    connector.WriteAvailable.TrySetResult(null);
                     //Connection.Pool.Release(connector);
 
                     // The following is a hack. It raises an exception if one was thrown in the first phases
@@ -1188,7 +1188,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     {
                         await tcs.Task;
                         var reader = connector.DataReader;
-                        reader.Init(this, behavior, _statements, sendTask);
+                        reader.Init(this, behavior, _statements, Task.CompletedTask);
                         await reader.NextResultAsync(cancellationToken);
                         return reader;
                     }
@@ -1196,7 +1196,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     {
                         tcs.Task.Wait();
                         var reader = connector.DataReader;
-                        reader.Init(this, behavior, _statements, sendTask);
+                        reader.Init(this, behavior, _statements, Task.CompletedTask);
                         reader.NextResult();
                         return reader;
                     }
