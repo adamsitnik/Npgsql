@@ -108,7 +108,13 @@ namespace Npgsql
             Connection = connection;
             Transaction = transaction;
             CommandType = CommandType.Text;
+            CommandNum = Interlocked.Increment(ref CurrentNum);
         }
+
+#pragma warning disable 1591
+        public int CommandNum;
+        static int CurrentNum;
+#pragma warning restore 1591
 
         #endregion Constructors
 
@@ -1107,6 +1113,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 }
             }
 
+            CommandText = $"SELECT {CommandNum} AS id,name FROM data";
             /*
             if (!Connection.Pool.TryAllocateFast(Connection, out var connector))
                 connector = await Connection.Pool.AllocateLong(Connection, NpgsqlTimeout.Infinite, async, cancellationToken);
@@ -1150,6 +1157,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                     //connector.UserTimeout = CommandTimeout * 1000;
 
+                    FileCrap.Write($"{connector.Id}:{CommandNum} Before enqueue");
                     var tcs = new TaskCompletionSource<NpgsqlReadBuffer>();
                     connector.PendingReads.Enqueue(tcs);
                     if ((behavior & CommandBehavior.SchemaOnly) == 0)
@@ -1208,9 +1216,11 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                     if (async)
                     {
+                        FileCrap.Write($"{connector.Id}:{CommandNum} Before await on reader task");
                         await tcs.Task;
                         var reader = connector.DataReader;
                         reader.Init(this, behavior, _statements, Task.CompletedTask);
+                        FileCrap.Write($"{connector.Id}:{CommandNum} Got resultset");
                         await reader.NextResultAsync(cancellationToken);
                         return reader;
                     }
@@ -1224,8 +1234,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     }
                 }
             }
-            catch
+            catch (Exception e)
             {
+                FileCrap.Write("CMD exception: " + e);
                 State = CommandState.Idle;
                 //Connection.Connector?.EndUserAction();
 

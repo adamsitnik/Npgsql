@@ -524,7 +524,7 @@ namespace Npgsql.Tests
         {
             var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
             {
-                MaxPoolSize = 1,
+                MaxPoolSize = 8,
                 MaxAutoPrepare = 20,
                 //AutoPrepareMinUsages = 5
             }.ToString();
@@ -540,7 +540,7 @@ namespace Npgsql.Tests
                 .Select(t => Task.Run(async () =>
                 {
                     var sum = 0;
-                    for (var i = 0; i < 1000; i++)
+                    for (var i = 0; i < 10000; i++)
                     {
                         using (var conn = new NpgsqlConnection(connString))
                         {
@@ -554,6 +554,7 @@ namespace Npgsql.Tests
                                     }
                         }
                     }
+                    FileCrap.Write($"Thread done");
                     return sum;
                 })));
 

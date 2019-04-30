@@ -818,6 +818,7 @@ namespace Npgsql
             Connector.CurrentReader = null;
             Connector.EndUserAction();
 
+            FileCrap.Write($"{Connector.Id}:{Command.CommandNum} Completed read");
             Connector.ReaderCompleted.TrySetResult(null);
 
             // If the reader is being closed as part of the connection closing, we don't apply

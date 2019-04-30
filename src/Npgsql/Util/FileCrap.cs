@@ -1,4 +1,5 @@
 using System.IO;
+using System.Threading;
 
 namespace Npgsql.Util
 {
@@ -17,7 +18,7 @@ namespace Npgsql.Util
         {
             lock (_obj)
             {
-                _writer.WriteLine(s);
+                _writer.WriteLine($"[{Thread.CurrentThread.ManagedThreadId,2}] {s}");
                 _writer.Flush();
             }
         }

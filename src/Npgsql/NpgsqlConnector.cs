@@ -853,7 +853,16 @@ namespace Npgsql
             {
                 while (true)
                 {
+                    /*
+                    ReaderCompleted.Reset();
+                    await ReaderCompleted;
+                    while (PendingReads.TryDequeue(out var tcs))
+                    {
+                        await ReadBuffer.Ensure(5, true);
+                        tcs.SetResult(null);
+                    }*/
                     await ReadBuffer.Ensure(5, true);
+                    FileCrap.Write($"{Id} Message received, {PendingReads.Count} pending");
                     if (!PendingReads.TryDequeue(out var tcs))
                         throw new Exception("Got message(s) from PostgreSQL but no command is pending");
                     ReaderCompleted.Reset();
@@ -863,6 +872,7 @@ namespace Npgsql
             }
             catch (Exception e)
             {
+                FileCrap.Write("READ exception: " + e);
                 Log.Error("Exception in main read loop", e, Id);
                 Break();
             }
@@ -881,16 +891,19 @@ namespace Npgsql
                     WriteAvailable.Reset();
                     while (PendingWrites.TryDequeue(out var cmd))
                     {
+                        FileCrap.Write($"{Id}:{cmd.CommandNum} Before send execute");
                         await cmd.SendExecute(true);
                         //Interlocked.Increment(ref NumCommandsWritten);
                     }
 
+                    FileCrap.Write($"{Id} Flush");
                     await WriteBuffer.Flush(true);
                     //Interlocked.Increment(ref NumFlushes);
                 }
             }
             catch (Exception e)
             {
+                FileCrap.Write("WRITE exception: " + e);
                 Log.Error("Exception in main write loop", e, Id);
                 Break();
             }
