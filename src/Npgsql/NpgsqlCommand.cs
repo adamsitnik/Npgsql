@@ -1113,14 +1113,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 }
             }
 
-            CommandText = $"SELECT {CommandNum} AS id,name FROM data";
+            if (CommandText.Contains("name FROM data"))
+                CommandText = $"SELECT {CommandNum} AS id,name FROM data";
             /*
             if (!Connection.Pool.TryAllocateFast(Connection, out var connector))
                 connector = await Connection.Pool.AllocateLong(Connection, NpgsqlTimeout.Infinite, async, cancellationToken);
             Connection.Connector = connector;
             */
 
-            var connector = ConnectionPool[Thread.CurrentThread.ManagedThreadId % Connection.Settings.MaxPoolSize];
+            //var connector = ConnectionPool[Thread.CurrentThread.ManagedThreadId % Connection.Settings.MaxPoolSize];
+            var connector = ConnectionPool[Interlocked.Increment(ref _poolIndex) % Connection.Settings.MaxPoolSize];
             Connection.Connector = connector;
 
             try
@@ -1158,8 +1160,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     //connector.UserTimeout = CommandTimeout * 1000;
 
                     FileCrap.Write($"{connector.Id}:{CommandNum} Before enqueue");
-                    var tcs = new TaskCompletionSource<NpgsqlReadBuffer>();
-                    connector.PendingReads.Enqueue(tcs);
+                    var tcs = new TaskCompletionSource<object>();
+                    connector.Pending.Enqueue((this, tcs));
+                    connector.WriteAvailable.TrySetResult(null);
                     if ((behavior & CommandBehavior.SchemaOnly) == 0)
                     {
                         if (connector.Settings.MaxAutoPrepare > 0)
@@ -1204,9 +1207,6 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     }
 
                     //Connection.Pool.Release(connector);
-                    connector.PendingWrites.Enqueue(this);
-                    connector.WriteAvailable.TrySetResult(null);
-                    //Connection.Pool.Release(connector);
 
                     // The following is a hack. It raises an exception if one was thrown in the first phases
                     // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
@@ -1249,6 +1249,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         [CanBeNull]
         static NpgsqlConnector[] ConnectionPool;
+
+        static int _poolIndex;
 
         readonly object _poolInitLock = new object();
 

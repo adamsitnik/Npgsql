@@ -844,7 +844,8 @@ namespace Npgsql
 
         #region Main read/write loops
 
-        internal ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>> PendingReads = new ConcurrentQueue<TaskCompletionSource<NpgsqlReadBuffer>>();
+        internal ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)>();
+        internal ConcurrentQueue<TaskCompletionSource<object>> InFlight = new ConcurrentQueue<TaskCompletionSource<object>>();
         internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
 
         async Task MainReadLoop()
@@ -853,17 +854,9 @@ namespace Npgsql
             {
                 while (true)
                 {
-                    /*
-                    ReaderCompleted.Reset();
-                    await ReaderCompleted;
-                    while (PendingReads.TryDequeue(out var tcs))
-                    {
-                        await ReadBuffer.Ensure(5, true);
-                        tcs.SetResult(null);
-                    }*/
                     await ReadBuffer.Ensure(5, true);
-                    FileCrap.Write($"{Id} Message received, {PendingReads.Count} pending");
-                    if (!PendingReads.TryDequeue(out var tcs))
+                    FileCrap.Write($"{Id} Message received, {Pending.Count} pending");
+                    if (!InFlight.TryDequeue(out var tcs))
                         throw new Exception("Got message(s) from PostgreSQL but no command is pending");
                     ReaderCompleted.Reset();
                     tcs.SetResult(null);
@@ -889,10 +882,11 @@ namespace Npgsql
                 {
                     await WriteAvailable;
                     WriteAvailable.Reset();
-                    while (PendingWrites.TryDequeue(out var cmd))
+                    while (Pending.TryDequeue(out var tup))
                     {
-                        FileCrap.Write($"{Id}:{cmd.CommandNum} Before send execute");
-                        await cmd.SendExecute(true);
+                        FileCrap.Write($"{Id}:{tup.Item1.CommandNum} Before send execute");
+                        InFlight.Enqueue(tup.Item2);
+                        await tup.Item1.SendExecute(true);
                         //Interlocked.Increment(ref NumCommandsWritten);
                     }
 
