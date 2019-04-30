@@ -1087,9 +1087,18 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             //var connector = CheckReadyAndGetConnector();
             //connector.StartUserAction(this);
 
+            /*
             if (!Connection.Pool.TryAllocateFast(Connection, out var connector))
                 connector = await Connection.Pool.AllocateLong(Connection, NpgsqlTimeout.Infinite, async, cancellationToken);
-            Connection.Connector = connector;
+                */
+
+            if (!_threadConnector.IsValueCreated)
+            {
+                var conn = new NpgsqlConnector(Connection);
+                await conn.Open(NpgsqlTimeout.Infinite, async, cancellationToken);
+                _threadConnector.Value = conn;
+            }
+            var connector = Connection.Connector = _threadConnector.Value;
 
             try
             {
@@ -1167,7 +1176,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                         sendTask = SendExecuteSchemaOnly(async);
                     }
 
-                    Connection.Pool.Release(connector);
+                    //Connection.Pool.Release(connector);
 
                     // The following is a hack. It raises an exception if one was thrown in the first phases
                     // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
@@ -1204,6 +1213,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 throw;
             }
         }
+
+        static ThreadLocal<NpgsqlConnector> _threadConnector = new ThreadLocal<NpgsqlConnector>();
 
         #endregion
 
