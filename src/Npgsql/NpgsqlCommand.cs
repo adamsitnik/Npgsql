@@ -1093,6 +1093,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             //var connector = CheckReadyAndGetConnector();
             //connector.StartUserAction(this);
 
+            /*
             if (ConnectionPool == null)
             {
                 lock (_poolInitLock)
@@ -1114,6 +1115,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
 
             var connector = ConnectionPool[Interlocked.Increment(ref _poolIndex)  / 500 % Connection.Settings.MaxPoolSize];
+            Connection.Connector = connector;
+            */
+            if (_connectorTls == null)
+            {
+                var conn = new NpgsqlConnector(Connection);
+                conn.Open(NpgsqlTimeout.Infinite, false, cancellationToken).Wait();
+                _connectorTls = conn;
+            }
+
+            var connector = _connectorTls;
             Connection.Connector = connector;
 
             try
@@ -1151,8 +1162,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     //connector.UserTimeout = CommandTimeout * 1000;
 
                     var tcs = new TaskCompletionSource<object>();
-                    connector.Pending.Enqueue((this, tcs));
-                    connector.WriteSemaphore.Release();
+                    await connector.Go(this, tcs);
+                    //connector.Pending.Enqueue((this, tcs));
+                    //connector.WriteSemaphore.Release();
                     //connector.WriteAvailable.TrySetResult(null);
                     if ((behavior & CommandBehavior.SchemaOnly) == 0)
                     {
@@ -1235,13 +1247,15 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
         }
 
+        [ThreadStatic] static NpgsqlConnector _connectorTls;
+        /*
         [CanBeNull]
         static NpgsqlConnector[] ConnectionPool;
 
         static int _poolIndex;
 
         readonly object _poolInitLock = new object();
-
+*/
         #endregion
 
         #region Transactions

@@ -869,6 +869,18 @@ namespace Npgsql
             }
         }
 
+        internal async Task Go(NpgsqlCommand cmd, TaskCompletionSource<object> tcs)
+        {
+            Pending.Enqueue((cmd, tcs));
+            while (Pending.TryDequeue(out var tup))
+            {
+                InFlight.Enqueue(tup.Item2);
+                await tup.Item1.SendExecute(true);
+            }
+
+            await WriteBuffer.Flush(true);
+        }
+
         internal SemaphoreSlim WriteSemaphore = new SemaphoreSlim(0);
 
         async Task MainWriteLoop()
