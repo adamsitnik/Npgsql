@@ -3,22 +3,23 @@ using System.Collections.Generic;
 using System.Reflection;
 using Npgsql.TypeHandlers;
 using Npgsql.TypeHandlers.CompositeHandlers;
+using Npgsql.Util;
 using NpgsqlTypes;
 
 namespace Npgsql.TypeMapping
 {
     abstract class TypeMapperBase : INpgsqlTypeMapper
     {
-        internal Dictionary<string, NpgsqlTypeMapping> Mappings { get; } = new Dictionary<string, NpgsqlTypeMapping>();
+        internal readonly Dictionary<string, NpgsqlTypeMapping> Mappings;
+        internal readonly ResettableDictionaryFacade<string, NpgsqlTypeMapping> MappingsFacade;
 
         public INpgsqlNameTranslator DefaultNameTranslator { get; }
 
         protected TypeMapperBase(INpgsqlNameTranslator defaultNameTranslator)
         {
-            if (defaultNameTranslator == null)
-                throw new ArgumentNullException(nameof(defaultNameTranslator));
-
-            DefaultNameTranslator = defaultNameTranslator;
+            DefaultNameTranslator = defaultNameTranslator ?? throw new ArgumentNullException(nameof(defaultNameTranslator));
+            Mappings = new Dictionary<string, NpgsqlTypeMapping>();
+            MappingsFacade = new ResettableDictionaryFacade<string, NpgsqlTypeMapping>(Mappings);
         }
 
         #region Mapping management
@@ -27,15 +28,15 @@ namespace Npgsql.TypeMapping
         {
             if (Mappings.ContainsKey(mapping.PgTypeName))
                 RemoveMapping(mapping.PgTypeName);
-            Mappings[mapping.PgTypeName] = mapping;
+            MappingsFacade[mapping.PgTypeName] = mapping;
             return this;
         }
 
-        public virtual bool RemoveMapping(string pgTypeName) => Mappings.Remove(pgTypeName);
+        public virtual bool RemoveMapping(string pgTypeName) => MappingsFacade.Remove(pgTypeName);
 
         IEnumerable<NpgsqlTypeMapping> INpgsqlTypeMapper.Mappings => Mappings.Values;
 
-        public abstract void Reset();
+        public virtual void Reset() => MappingsFacade.Reset();
 
         #endregion Mapping management
 

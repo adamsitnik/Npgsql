@@ -24,7 +24,7 @@ namespace Npgsql.TypeMapping
         internal ReaderWriterLockSlim Lock { get; }
             = new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion);
 
-        int _changeCounter;
+        int _changeCounter = 1;
 
         static GlobalTypeMapper()
         {
@@ -89,8 +89,7 @@ namespace Npgsql.TypeMapping
             Lock.EnterWriteLock();
             try
             {
-                Mappings.Clear();
-                SetupGlobalTypeMapper();
+                base.Reset();
                 RecordChange();
             }
             finally
@@ -216,7 +215,7 @@ namespace Npgsql.TypeMapping
                 var augmentedClrType = new Type[inetMapping.ClrTypes.Length + 1];
                 Array.Copy(inetMapping.ClrTypes, augmentedClrType, inetMapping.ClrTypes.Length);
                 augmentedClrType[augmentedClrType.Length - 1] = readOnlyIpType;
-                Mappings["inet"] = new NpgsqlTypeMappingBuilder
+                MappingsFacade["inet"] = new NpgsqlTypeMappingBuilder
                 {
                     PgTypeName = "inet",
                     NpgsqlDbType = inetMapping.NpgsqlDbType,
@@ -226,6 +225,8 @@ namespace Npgsql.TypeMapping
                     TypeHandlerFactory = inetMapping.TypeHandlerFactory
                 }.Build();
             }
+
+            MappingsFacade.TakeSnapshot();
         }
 
         #endregion Setup for built-in handlers

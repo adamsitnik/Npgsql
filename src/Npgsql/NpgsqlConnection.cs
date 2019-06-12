@@ -201,7 +201,7 @@ namespace Npgsql
             // Since this pooled connector was opened, types may have been added (and ReloadTypes() called),
             // or global mappings may have changed. Bring this up to date if needed.
             var mapper = Connector.TypeMapper;
-            if (mapper.ChangeCounter != TypeMapping.GlobalTypeMapper.Instance.ChangeCounter)
+            if (mapper.GlobalChangeCounter != TypeMapping.GlobalTypeMapper.Instance.ChangeCounter)
             {
                 // We always do this synchronously which isn't amazing but not very important, because
                 // it's supposed to be a pretty rare event and the whole point is to keep this method
@@ -276,7 +276,7 @@ namespace Npgsql
                         // Since this pooled connector was opened, types may have been added (and ReloadTypes() called),
                         // or global mappings may have changed. Bring this up to date if needed.
                         mapper = Connector.TypeMapper;
-                        if (mapper.ChangeCounter != TypeMapping.GlobalTypeMapper.Instance.ChangeCounter)
+                        if (mapper.GlobalChangeCounter != TypeMapping.GlobalTypeMapper.Instance.ChangeCounter)
                             await Connector.LoadDatabaseInfo(NpgsqlTimeout.Infinite, async);
                     }
 

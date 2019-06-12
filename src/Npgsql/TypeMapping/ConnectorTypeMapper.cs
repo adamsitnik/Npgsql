@@ -9,6 +9,7 @@ using Npgsql.PostgresTypes;
 using Npgsql.TypeHandlers;
 using Npgsql.TypeHandlers.CompositeHandlers;
 using Npgsql.TypeHandling;
+using Npgsql.Util;
 using NpgsqlTypes;
 
 namespace Npgsql.TypeMapping
@@ -30,15 +31,22 @@ namespace Npgsql.TypeMapping
 
         internal NpgsqlTypeHandler UnrecognizedTypeHandler { get; }
 
-        readonly Dictionary<uint, NpgsqlTypeHandler> _byOID = new Dictionary<uint, NpgsqlTypeHandler>();
-        readonly Dictionary<NpgsqlDbType, NpgsqlTypeHandler> _byNpgsqlDbType = new Dictionary<NpgsqlDbType, NpgsqlTypeHandler>();
-        readonly Dictionary<DbType, NpgsqlTypeHandler> _byDbType = new Dictionary<DbType, NpgsqlTypeHandler>();
-        readonly Dictionary<string, NpgsqlTypeHandler> _byTypeName = new Dictionary<string, NpgsqlTypeHandler>();
+        readonly Dictionary<uint, NpgsqlTypeHandler> _byOID;
+        readonly ResettableDictionaryFacade<uint, NpgsqlTypeHandler> _byOIDFacade;
+
+        readonly Dictionary<NpgsqlDbType, NpgsqlTypeHandler> _byNpgsqlDbType;
+        readonly ResettableDictionaryFacade<NpgsqlDbType, NpgsqlTypeHandler> _byNpgsqlDbTypeFacade;
+
+        readonly Dictionary<DbType, NpgsqlTypeHandler> _byDbType;
+        readonly ResettableDictionaryFacade<DbType, NpgsqlTypeHandler> _byDbTypeFacade;
+
+        readonly Dictionary<string, NpgsqlTypeHandler> _byTypeName;
+        readonly ResettableDictionaryFacade<string, NpgsqlTypeHandler> _byTypeNameFacade;
 
         /// <summary>
         /// Maps CLR types to their type handlers.
         /// </summary>
-        readonly Dictionary<Type, NpgsqlTypeHandler> _byClrType= new Dictionary<Type, NpgsqlTypeHandler>();
+        readonly Dictionary<Type, NpgsqlTypeHandler> _byClrType = new Dictionary<Type, NpgsqlTypeHandler>();
 
         /// <summary>
         /// Maps CLR types to their array handlers.
@@ -50,7 +58,10 @@ namespace Npgsql.TypeMapping
         /// mapper was created, to detect mapping changes. If changes are made to this connection's
         /// mapper, the change counter is set to -1.
         /// </summary>
-        internal int ChangeCounter { get; private set; }
+        internal int GlobalChangeCounter { get; private set; }
+
+        bool HasLocalChanges { get; set; }
+        bool HasGlobalChanges => GlobalChangeCounter != GlobalTypeMapper.Instance.ChangeCounter;
 
         static readonly NpgsqlLogger Log = NpgsqlLogManager.GetCurrentClassLogger();
 
@@ -58,10 +69,19 @@ namespace Npgsql.TypeMapping
 
         internal ConnectorTypeMapper(NpgsqlConnector connector): base(GlobalTypeMapper.Instance.DefaultNameTranslator)
         {
+            _byOID = new Dictionary<uint, NpgsqlTypeHandler>();
+            _byOIDFacade = new ResettableDictionaryFacade<uint, NpgsqlTypeHandler>(_byOID);
+            _byNpgsqlDbType = new Dictionary<NpgsqlDbType, NpgsqlTypeHandler>();
+            _byNpgsqlDbTypeFacade = new ResettableDictionaryFacade<NpgsqlDbType, NpgsqlTypeHandler>(_byNpgsqlDbType);
+            _byDbType = new Dictionary<DbType, NpgsqlTypeHandler>();
+            _byDbTypeFacade = new ResettableDictionaryFacade<DbType, NpgsqlTypeHandler>(_byDbType);
+            _byTypeName = new Dictionary<string, NpgsqlTypeHandler>();
+
             _connector = connector;
             UnrecognizedTypeHandler = new UnknownTypeHandler(_connector.Connection!);
-            ClearBindings();
-            ResetMappings();
+            Reset();
+            //ClearBindings();
+            //ResetMappings();
         }
 
         #endregion Constructors
@@ -148,7 +168,7 @@ namespace Npgsql.TypeMapping
 
             base.AddMapping(mapping);
             BindType(mapping, _connector, true);
-            ChangeCounter = -1;
+            HasLocalChanges = true;
             return this;
         }
 
@@ -164,7 +184,7 @@ namespace Npgsql.TypeMapping
             // existing dictionaries because it's complex to remove arrays, ranges...
             ClearBindings();
             BindTypes();
-            ChangeCounter = -1;
+            HasLocalChanges = true;
             return true;
         }
 
@@ -188,7 +208,7 @@ namespace Npgsql.TypeMapping
             {
                 globalMapper.Lock.ExitReadLock();
             }
-            ChangeCounter = GlobalTypeMapper.Instance.ChangeCounter;
+            GlobalChangeCounter = GlobalTypeMapper.Instance.ChangeCounter;
         }
 
         void ClearBindings()
@@ -205,9 +225,32 @@ namespace Npgsql.TypeMapping
 
         public override void Reset()
         {
-            ClearBindings();
-            ResetMappings();
-            BindTypes();
+            if (HasGlobalChanges)
+            {
+                MappingsFacade.DropSnapshot();
+                MappingsFacade.Clear();
+                var globalMapper = GlobalTypeMapper.Instance;
+                globalMapper.Lock.EnterReadLock();
+                try
+                {
+                    foreach (var kv in globalMapper.Mappings)
+                        MappingsFacade.Add(kv.Key, kv.Value);
+                }
+                finally
+                {
+                    globalMapper.Lock.ExitReadLock();
+                }
+                GlobalChangeCounter = GlobalTypeMapper.Instance.ChangeCounter;
+                MappingsFacade.TakeSnapshot();
+
+                ClearBindings();
+                BindTypes();
+            }
+            if (HasLocalChanges)
+            {
+                base.Reset();  // Reset the mappings
+                // TODO: Reset the bindings
+            }
         }
 
         #endregion Mapping management
