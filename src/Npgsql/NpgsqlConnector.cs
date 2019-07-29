@@ -1626,7 +1626,7 @@ namespace Npgsql
         #region Keepalive
 
 #pragma warning disable CA1801 // Review unused parameters
-        void PerformKeepAlive(object state)
+        void PerformKeepAlive(object? state)
         {
             Debug.Assert(_isKeepAliveEnabled);
 

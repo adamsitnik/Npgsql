@@ -672,7 +672,7 @@ namespace Npgsql
         ///
         /// Note that notices are very different from notifications (see the <see cref="Notification"/> event).
         /// </remarks>
-        public event NoticeEventHandler Notice;
+        public event NoticeEventHandler? Notice;
 
         /// <summary>
         /// Fires when PostgreSQL notifications are received from PostgreSQL.
@@ -683,7 +683,7 @@ namespace Npgsql
         ///
         /// Note that notifications are very different from notices (see the <see cref="Notice"/> event).
         /// </remarks>
-        public event NotificationEventHandler Notification;
+        public event NotificationEventHandler? Notification;
 
         internal void OnNotice(PostgresNotice e)
         {

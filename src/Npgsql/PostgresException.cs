@@ -75,7 +75,7 @@ namespace Npgsql
             Line = GetValue<string>(nameof(Line));
             Routine = GetValue<string>(nameof(Routine));
 
-            T GetValue<T>(string propertyName) => (T)info.GetValue(propertyName, typeof(T));
+            T GetValue<T>(string propertyName) => (T)info.GetValue(propertyName, typeof(T))!;
         }
 
         /// <summary>

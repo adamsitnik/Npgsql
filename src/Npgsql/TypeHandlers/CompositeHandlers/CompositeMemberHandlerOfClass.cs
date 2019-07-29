@@ -64,7 +64,7 @@ namespace Npgsql.TypeHandlers.CompositeHandlers
                 return;
 
             var value = NullableHandler<TMember>.Exists
-                ? await NullableHandler<TMember>.ReadAsync(_handler, buffer, length, async)
+                ? await NullableHandler<TMember>.ReadAsync!(_handler, buffer, length, async)
                 : await _handler.Read<TMember>(buffer, length, async);
 
             _set!(composite, value);
@@ -83,7 +83,7 @@ namespace Npgsql.TypeHandlers.CompositeHandlers
 
             buffer.WriteUInt32(PostgresType.OID);
             if (NullableHandler<TMember>.Exists)
-                await NullableHandler<TMember>.WriteAsync(_handler, _get!(composite), buffer, lengthCache, null, async);
+                await NullableHandler<TMember>.WriteAsync!(_handler, _get!(composite), buffer, lengthCache, null, async);
             else
                 await _handler.WriteWithLengthInternal(_get!(composite), buffer, lengthCache, null, async);
         }
@@ -98,7 +98,7 @@ namespace Npgsql.TypeHandlers.CompositeHandlers
                 return 0;
 
             return NullableHandler<TMember>.Exists
-                ? NullableHandler<TMember>.ValidateAndGetLength(_handler, value, ref lengthCache, null)
+                ? NullableHandler<TMember>.ValidateAndGetLength!(_handler, value, ref lengthCache, null)
                 : _handler.ValidateAndGetLength(value, ref lengthCache, null);
         }
     }

@@ -774,7 +774,12 @@ namespace Npgsql
         /// <summary>
         /// Closes the <see cref="NpgsqlDataReader"/> reader, allowing a new command to be executed.
         /// </summary>
-        public Task CloseAsync() => Close(false, true);
+#if !NET461 && !NETSTANDARD2_0
+        public override Task CloseAsync()
+#else
+        public Task CloseAsync()
+#endif
+            => Close(false, true);
 
         internal async Task Close(bool connectionClosing, bool async)
         {
@@ -828,9 +833,9 @@ namespace Npgsql
             }
         }
 
-        #endregion
+#endregion
 
-        #region Simple value getters
+#region Simple value getters
 
         /// <summary>
         /// Gets the value of the specified column as a Boolean.
@@ -940,9 +945,9 @@ namespace Npgsql
         /// <returns>The value of the specified column.</returns>
         public override object this[int ordinal] => GetValue(ordinal);
 
-        #endregion
+#endregion
 
-        #region Provider-specific simple type getters
+#region Provider-specific simple type getters
 
         /// <summary>
         /// Gets the value of the specified column as an <see cref="NpgsqlDate"/>,
@@ -1006,9 +1011,9 @@ namespace Npgsql
         /// <returns>The value of the specified column.</returns>
         public NpgsqlDateTime GetTimeStamp(int ordinal) => GetFieldValue<NpgsqlDateTime>(ordinal);
 
-        #endregion
+#endregion
 
-        #region Special binary getters
+#region Special binary getters
 
         /// <summary>
         /// Reads a stream of bytes from the specified column, starting at location indicated by dataOffset, into the buffer, starting at the location indicated by bufferOffset.
@@ -1110,9 +1115,9 @@ namespace Npgsql
             }
         }
 
-        #endregion
+#endregion
 
-        #region Special text getters
+#region Special text getters
 
         /// <summary>
         /// Reads a stream of characters from the specified column, starting at location indicated by dataOffset, into the buffer, starting at the location indicated by bufferOffset.
@@ -1258,9 +1263,9 @@ namespace Npgsql
             return handler.GetTextReader(stream);
         }
 
-        #endregion
+#endregion
 
-        #region GetFieldValue
+#region GetFieldValue
 
         /// <summary>
         /// Asynchronously gets the value of the specified column as a type.
@@ -1315,14 +1320,14 @@ namespace Npgsql
             try
             {
                 return NullableHandler<T>.Exists
-                    ? NullableHandler<T>.Read(fieldDescription.Handler, Buffer, ColumnLen, fieldDescription)
+                    ? NullableHandler<T>.Read!(fieldDescription.Handler, Buffer, ColumnLen, fieldDescription)
                     : typeof(T) == typeof(object)
                         ? (T)fieldDescription.Handler.ReadAsObject(Buffer, ColumnLen, fieldDescription)
                         : fieldDescription.Handler.Read<T>(Buffer, ColumnLen, fieldDescription);
             }
             catch (NpgsqlSafeReadException e)
             {
-                throw e.InnerException;
+                throw e.InnerException!;
             }
             catch
             {
@@ -1358,8 +1363,8 @@ namespace Npgsql
             {
                 return NullableHandler<T>.Exists
                     ? ColumnLen <= Buffer.ReadBytesLeft
-                        ? NullableHandler<T>.Read(fieldDescription.Handler, Buffer, ColumnLen, fieldDescription)
-                        : await NullableHandler<T>.ReadAsync(fieldDescription.Handler, Buffer, ColumnLen, async, fieldDescription)
+                        ? NullableHandler<T>.Read!(fieldDescription.Handler, Buffer, ColumnLen, fieldDescription)
+                        : await NullableHandler<T>.ReadAsync!(fieldDescription.Handler, Buffer, ColumnLen, async, fieldDescription)
                     : typeof(T) == typeof(object)
                         ? ColumnLen <= Buffer.ReadBytesLeft
                             ? (T)fieldDescription.Handler.ReadAsObject(Buffer, ColumnLen, fieldDescription)
@@ -1370,7 +1375,7 @@ namespace Npgsql
             }
             catch (NpgsqlSafeReadException e)
             {
-                throw e.InnerException;
+                throw e.InnerException!;
             }
             catch
             {
@@ -1384,9 +1389,9 @@ namespace Npgsql
             }
         }
 
-        #endregion
+#endregion
 
-        #region GetValue
+#region GetValue
 
         /// <summary>
         /// Gets the value of the specified column as an instance of <see cref="object"/>.
@@ -1415,7 +1420,7 @@ namespace Npgsql
             }
             catch (NpgsqlSafeReadException e)
             {
-                throw e.InnerException;
+                throw e.InnerException!;
             }
             catch
             {
@@ -1429,12 +1434,12 @@ namespace Npgsql
             }
 
             // Used for Entity Framework <= 6 compability
-            if (Command.ObjectResultTypes?[ordinal] != null)
+            var objectResultType = Command.ObjectResultTypes?[ordinal];
+            if (objectResultType != null)
             {
-                var type = Command.ObjectResultTypes[ordinal];
-                result = type == typeof(DateTimeOffset)
+                result = objectResultType == typeof(DateTimeOffset)
                     ? new DateTimeOffset((DateTime)result)
-                    : Convert.ChangeType(result, type);
+                    : Convert.ChangeType(result, objectResultType)!;
             }
 
             return result;
@@ -1466,7 +1471,7 @@ namespace Npgsql
             }
             catch (NpgsqlSafeReadException e)
             {
-                throw e.InnerException;
+                throw e.InnerException!;
             }
             catch
             {
@@ -1487,9 +1492,9 @@ namespace Npgsql
         /// <returns>The value of the specified column.</returns>
         public override object this[string name] => GetValue(GetOrdinal(name));
 
-        #endregion
+#endregion
 
-        #region IsDBNull
+#region IsDBNull
 
         /// <summary>
         /// Gets a value that indicates whether the column contains nonexistent or missing values.
@@ -1530,9 +1535,9 @@ namespace Npgsql
             }
         }
 
-        #endregion
+#endregion
 
-        #region Other public accessors
+#region Other public accessors
 
         /// <summary>
         /// Gets the column ordinal given the name of the column.
@@ -1636,9 +1641,9 @@ namespace Npgsql
             => new ReadOnlyCollection<DbColumn>(GetColumnSchema().Cast<DbColumn>().ToList());
 #endif
 
-        #endregion
+#endregion
 
-        #region Schema metadata table
+#region Schema metadata table
 
 
         /// <summary>
@@ -1715,9 +1720,9 @@ namespace Npgsql
             return table;
         }
 
-        #endregion Schema metadata table
+#endregion Schema metadata table
 
-        #region Seeking
+#region Seeking
 
         Task SeekToColumn(int column, bool async)
         {
@@ -1827,9 +1832,9 @@ namespace Npgsql
             }
         }
 
-        #endregion
+#endregion
 
-        #region ConsumeRow
+#region ConsumeRow
 
         Task ConsumeRow(bool async)
         {
@@ -1885,9 +1890,9 @@ namespace Npgsql
             Buffer.ReadPosition = _dataMsgEnd;
         }
 
-        #endregion
+#endregion
 
-        #region Checks
+#region Checks
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         RowDescriptionMessage CheckResultSet()
@@ -1970,7 +1975,7 @@ namespace Npgsql
                 throw new InvalidOperationException("The reader is closed");
         }
 
-        #endregion
+#endregion
     }
 
     enum ReaderState

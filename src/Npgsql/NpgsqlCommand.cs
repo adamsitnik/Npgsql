@@ -556,7 +556,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         /// Creates a server-side prepared statement on the PostgreSQL server.
         /// This will make repeated future executions of this command much faster.
         /// </summary>
-#if !NET461 && !NETSTANDARD2_0 && !NETSTANDARD2_1
+#if !NET461 && !NETSTANDARD2_0
         public override Task PrepareAsync(CancellationToken cancellationToken)
 #else
         public Task PrepareAsync(CancellationToken cancellationToken)
@@ -1082,7 +1082,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             connector.StartUserAction(this);
             try
             {
-                using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd).Cancel(), this))
+                using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd!).Cancel(), this))
                 {
                     ValidateParameters(connector.TypeMapper);
 

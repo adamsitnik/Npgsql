@@ -26,7 +26,7 @@ namespace Npgsql
         static readonly PostgresBaseType[] Types = typeof(NpgsqlDbType).GetFields()
             .Select(f => f.GetCustomAttribute<BuiltInPostgresType>())
             .Where(a => a != null)
-            .Select(a => new PostgresBaseType("pg_catalog", a.Name, a.OID))
+            .Select(a => new PostgresBaseType("pg_catalog", a!.Name, a!.OID))
             .ToArray();
 
         protected override IEnumerable<PostgresType> GetTypes() => Types;

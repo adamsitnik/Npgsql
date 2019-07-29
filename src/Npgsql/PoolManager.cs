@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 
 namespace Npgsql
@@ -21,7 +21,7 @@ namespace Npgsql
         static volatile (string Key, ConnectorPool Pool)[] _pools = new (string, ConnectorPool)[InitialPoolsSize];
         static volatile int _nextSlot;
 
-        internal static bool TryGetValue(string key, [NotNullWhenTrue] out ConnectorPool? pool)
+        internal static bool TryGetValue(string key, [NotNullWhen(true)] out ConnectorPool? pool)
         {
             // Note that pools never get removed. _pools is strictly append-only.
             var nextSlot = _nextSlot;

@@ -4,10 +4,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data.Common;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
-using JetBrains.Annotations;
 
 namespace Npgsql
 {
@@ -92,11 +91,11 @@ namespace Npgsql
 
             PropertiesByKeyword = (
                 from p in properties
-                let displayName = p.GetCustomAttribute<DisplayNameAttribute>().DisplayName.ToUpperInvariant()
+                let displayName = p.GetCustomAttribute<DisplayNameAttribute>()!.DisplayName.ToUpperInvariant()
                 let propertyName = p.Name.ToUpperInvariant()
                 from k in new[] { displayName }
                   .Concat(propertyName != displayName ? new[] { propertyName } : EmptyStringArray )
-                  .Concat(p.GetCustomAttribute<NpgsqlConnectionStringPropertyAttribute>().Synonyms
+                  .Concat(p.GetCustomAttribute<NpgsqlConnectionStringPropertyAttribute>()!.Synonyms
                     .Select(a => a.ToUpperInvariant())
                   )
                   .Select(k => new { Property = p, Keyword = k })
@@ -105,7 +104,7 @@ namespace Npgsql
 
             PropertyNameToCanonicalKeyword = properties.ToDictionary(
                 p => p.Name,
-                p => p.GetCustomAttribute<DisplayNameAttribute>().DisplayName
+                p => p.GetCustomAttribute<DisplayNameAttribute>()!.DisplayName
             );
 
             PropertyDefaults = properties
@@ -113,7 +112,7 @@ namespace Npgsql
                 .ToDictionary(
                 p => p,
                 p => p.GetCustomAttribute<DefaultValueAttribute>() != null
-                    ? p.GetCustomAttribute<DefaultValueAttribute>().Value
+                    ? p.GetCustomAttribute<DefaultValueAttribute>()!.Value
                     : (p.PropertyType.GetTypeInfo().IsValueType ? Activator.CreateInstance(p.PropertyType) : null)
             );
         }
@@ -127,7 +126,7 @@ namespace Npgsql
         /// </summary>
         /// <param name="keyword">The key of the item to get or set.</param>
         /// <returns>The value associated with the specified key.</returns>
-        public override object this[[NotNull] string keyword]
+        public override object this[string keyword]
         {
             get
             {
@@ -137,21 +136,22 @@ namespace Npgsql
             }
             set
             {
-                if (value == null) {
+                if (value == null)
+                {
                     Remove(keyword);
                     return;
                 }
 
                 var p = GetProperty(keyword);
-                try {
-                    object convertedValue;
-                    if (p.PropertyType.GetTypeInfo().IsEnum && value is string) {
-                        convertedValue = Enum.Parse(p.PropertyType, (string)value);
-                    } else {
-                        convertedValue = Convert.ChangeType(value, p.PropertyType);
-                    }
+                try
+                {
+                    var convertedValue = p.PropertyType.GetTypeInfo().IsEnum && value is string str
+                        ? Enum.Parse(p.PropertyType, str)
+                        : Convert.ChangeType(value, p.PropertyType);
                     p.SetValue(this, convertedValue);
-                } catch (Exception e) {
+                }
+                catch (Exception e)
+                {
                     throw new ArgumentException("Couldn't set " + keyword, keyword, e);
                 }
             }
@@ -169,7 +169,7 @@ namespace Npgsql
         /// </summary>
         /// <param name="keyword">The key of the key/value pair to be removed from the connection string in this DbConnectionStringBuilder.</param>
         /// <returns><b>true</b> if the key existed within the connection string and was removed; <b>false</b> if the key did not exist.</returns>
-        public override bool Remove([NotNull] string keyword)
+        public override bool Remove(string keyword)
         {
             var p = GetProperty(keyword);
             var canonicalName = PropertyNameToCanonicalKeyword[p.Name];
@@ -204,10 +204,8 @@ namespace Npgsql
         /// </summary>
         /// <param name="keyword">The key to locate in the <see cref="NpgsqlConnectionStringBuilder"/>.</param>
         /// <returns><b>true</b> if the <see cref="NpgsqlConnectionStringBuilder"/> contains an entry with the specified key; otherwise <b>false</b>.</returns>
-#nullable disable
         public override bool ContainsKey(string keyword)
-#nullable enable
-            => keyword == null
+            => keyword is null
                 ? throw new ArgumentNullException(nameof(keyword))
                 : PropertiesByKeyword.ContainsKey(keyword.ToUpperInvariant());
 
@@ -231,16 +229,14 @@ namespace Npgsql
         /// <param name="keyword">The key of the item to retrieve.</param>
         /// <param name="value">The value corresponding to the key.</param>
         /// <returns><b>true</b> if keyword was found within the connection string, <b>false</b> otherwise.</returns>
-#nullable disable
-        public override bool TryGetValue(string keyword, [NotNullWhenTrue] out object value)
-#nullable enable
+        public override bool TryGetValue(string keyword, out object value)
         {
             if (keyword == null)
                 throw new ArgumentNullException(nameof(keyword));
 
             if (!PropertiesByKeyword.ContainsKey(keyword.ToUpperInvariant()))
             {
-                value = null;
+                value = null!;
                 return false;
             }
 
@@ -1263,7 +1259,7 @@ namespace Npgsql
         /// <summary>
         /// Determines whether the specified object is equal to the current object.
         /// </summary>
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
             => obj is NpgsqlConnectionStringBuilder o && EquivalentTo(o);
 
         /// <summary>
@@ -1296,7 +1292,7 @@ namespace Npgsql
         /// <param name="arrayIndex">
         /// The zero-based index in array at which copying begins.
         /// </param>
-        public void CopyTo([NotNull] KeyValuePair<string, object>[] array, int arrayIndex)
+        public void CopyTo(KeyValuePair<string, object>[] array, int arrayIndex)
         {
             foreach (var kv in this)
                 array[arrayIndex++] = kv;
@@ -1347,7 +1343,6 @@ namespace Npgsql
     /// string. Optionally holds a set of synonyms for the property.
     /// </summary>
     [AttributeUsage(AttributeTargets.Property)]
-    [MeansImplicitUse]
     public class NpgsqlConnectionStringPropertyAttribute : Attribute
     {
         /// <summary>
@@ -1379,7 +1374,6 @@ namespace Npgsql
     /// <summary>
     /// An option specified in the connection string that activates special compatibility features.
     /// </summary>
-    [PublicAPI]
     public enum ServerCompatibilityMode
     {
         /// <summary>
@@ -1400,7 +1394,6 @@ namespace Npgsql
     /// <summary>
     /// Specifies how to manage SSL.
     /// </summary>
-    [PublicAPI]
     public enum SslMode
     {
         /// <summary>

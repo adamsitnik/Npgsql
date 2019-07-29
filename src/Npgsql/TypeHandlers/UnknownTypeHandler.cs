@@ -58,14 +58,16 @@ namespace Npgsql.TypeHandlers
             if (value is string asString)
                 return base.ValidateAndGetLength(asString, ref lengthCache, parameter);
 
-            var converted = Convert.ToString(value);
             if (parameter == null)
                 throw CreateConversionButNoParamException(value.GetType());
+
+            var converted = Convert.ToString(value)!;
             parameter.ConvertedValue = converted;
+
             return base.ValidateAndGetLength(converted, ref lengthCache, parameter);
         }
 
-        protected internal override Task WriteObjectWithLength(object value, NpgsqlWriteBuffer buf, NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter, bool async)
+        protected internal override Task WriteObjectWithLength(object? value, NpgsqlWriteBuffer buf, NpgsqlLengthCache? lengthCache, NpgsqlParameter? parameter, bool async)
         {
             Debug.Assert(parameter != null);
 
@@ -85,7 +87,7 @@ namespace Npgsql.TypeHandlers
             async Task WriteWithLengthLong()
             {
                 await buf.Flush(async);
-                buf.WriteInt32(ValidateObjectAndGetLength(value, ref lengthCache, parameter));
+                buf.WriteInt32(ValidateObjectAndGetLength(value!, ref lengthCache, parameter));
                 await base.Write(convertedValue, buf, lengthCache, parameter, async);
             }
         }

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
@@ -116,9 +117,7 @@ namespace Npgsql
         /// corruption will occur. If in doubt, use <see cref="Write{T}(T, NpgsqlDbType)"/> to manually
         /// specify the type.
         /// </typeparam>
-#nullable disable  // Necessary since this method needs to accept null
-        public void Write<T>(T value)
-#nullable enable
+        public void Write<T>([AllowNull] T value)
         {
             var p = _params[_column];
             if (p == null)
