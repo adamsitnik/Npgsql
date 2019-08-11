@@ -21,6 +21,8 @@ namespace Npgsql
         static volatile (string Key, ConnectorPool Pool)[] _pools = new (string, ConnectorPool)[InitialPoolsSize];
         static volatile int _nextSlot;
 
+        internal static (string Key, ConnectorPool Pool)[] Pools => _pools;
+
         internal static bool TryGetValue(string key, [NotNullWhenTrue] out ConnectorPool? pool)
         {
             // Note that pools never get removed. _pools is strictly append-only.

@@ -923,7 +923,11 @@ namespace Npgsql
 
                         case BackendMessageCode.ReadyForQuery:
                             if (error != null)
+                            {
+                                NpgsqlEventSource.Log.CommandFailed();
                                 throw error;
+                            }
+
                             break;
 
                         // Asynchronous messages which can come anytime, they have already been handled

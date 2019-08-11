@@ -5,6 +5,13 @@
     <PackageTags>npgsql postgresql postgres ado ado.net database sql</PackageTags>
     <TargetFrameworks>net461;netstandard2.0;netstandard2.1;netcoreapp3.0</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!--
+          Note: we target netcoreapp3.0 for the following which aren't yet in netstandard2.1:
+          * New async API (should be in netstandard2.1 for 3.0.0-preview7
+          * New EventSource counters (e.g. PollingCounter)
+    -->
+    <TargetFrameworks>net461;netstandard2.0;netstandard2.1;netcoreapp3.0</TargetFrameworks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="4.5.2" />
