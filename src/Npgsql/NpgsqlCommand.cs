@@ -1085,8 +1085,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 {
                     ValidateParameters(connector.TypeMapper);
 
-                    if (IsExplicitlyPrepared)
+                    switch (IsExplicitlyPrepared)
                     {
+                    case true:
                         Debug.Assert(_connectorPreparedOn != null);
                         if (_connectorPreparedOn != connector)
                         {
@@ -1094,11 +1095,35 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                             foreach (var s in _statements)
                                 s.PreparedStatement = null;
                             ResetExplicitPreparation();
-                            ProcessRawQuery();
+                            goto case false;
                         }
-                    }
-                    else
+                        NpgsqlEventSource.Log.CommandStart(CommandText, true);
+                        break;
+
+                    case false:
                         ProcessRawQuery();
+
+                        if (connector.Settings.MaxAutoPrepare > 0)
+                        {
+                            foreach (var statement in _statements)
+                            {
+                                // If this statement isn't prepared, see if it gets implicitly prepared.
+                                // Note that this may return null (not enough usages for automatic preparation).
+                                var isFullyPrepared = true;
+                                if (!statement.IsPrepared)
+                                    statement.PreparedStatement =
+                                        connector.PreparedStatementManager.TryGetAutoPrepared(statement);
+                                if (statement.PreparedStatement != null)
+                                    statement.PreparedStatement.LastUsed = DateTime.UtcNow;
+                                else
+                                    isFullyPrepared = false;
+                                NpgsqlEventSource.Log.CommandStart(CommandText, isFullyPrepared);
+                            }
+                            _connectorPreparedOn = connector;
+                        } else
+                            NpgsqlEventSource.Log.CommandStart(CommandText, false);
+                        break;
+                    }
 
                     State = CommandState.InProgress;
 
@@ -1111,39 +1136,19 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                     connector.UserTimeout = CommandTimeout * 1000;
 
-                    if ((behavior & CommandBehavior.SchemaOnly) == 0)
-                    {
-                        if (connector.Settings.MaxAutoPrepare > 0)
-                        {
-                            foreach (var statement in _statements)
-                            {
-                                // If this statement isn't prepared, see if it gets implicitly prepared.
-                                // Note that this may return null (not enough usages for automatic preparation).
-                                if (!statement.IsPrepared)
-                                    statement.PreparedStatement =
-                                        connector.PreparedStatementManager.TryGetAutoPrepared(statement);
-                                if (statement.PreparedStatement != null)
-                                    statement.PreparedStatement.LastUsed = DateTime.UtcNow;
-                            }
-                            _connectorPreparedOn = connector;
-                        }
-
-                        // We do not wait for the entire send to complete before proceeding to reading -
-                        // the sending continues in parallel with the user's reading. Waiting for the
-                        // entire send to complete would trigger a deadlock for multi-statement commands,
-                        // where PostgreSQL sends large results for the first statement, while we're sending large
-                        // parameter data for the second. See #641.
-                        // Instead, all sends for non-first statements and for non-first buffers are performed
-                        // asynchronously (even if the user requested sync), in a special synchronization context
-                        // to prevents a dependency on the thread pool (which would also trigger deadlocks).
-                        // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
-                        // send functions can switch to the special async mode when needed.
-                        sendTask = SendExecute(connector, async);
-                    }
-                    else
-                    {
-                        sendTask = SendExecuteSchemaOnly(connector, async);
-                    }
+                    // We do not wait for the entire send to complete before proceeding to reading -
+                    // the sending continues in parallel with the user's reading. Waiting for the
+                    // entire send to complete would trigger a deadlock for multi-statement commands,
+                    // where PostgreSQL sends large results for the first statement, while we're sending large
+                    // parameter data for the second. See #641.
+                    // Instead, all sends for non-first statements and for non-first buffers are performed
+                    // asynchronously (even if the user requested sync), in a special synchronization context
+                    // to prevents a dependency on the thread pool (which would also trigger deadlocks).
+                    // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
+                    // send functions can switch to the special async mode when needed.
+                    sendTask = (behavior & CommandBehavior.SchemaOnly) == 0
+                        ? SendExecute(connector, async)
+                        : SendExecuteSchemaOnly(connector, async);
 
                     // The following is a hack. It raises an exception if one was thrown in the first phases
                     // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
@@ -1151,7 +1156,6 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     if (sendTask.IsFaulted)
                         sendTask.GetAwaiter().GetResult();
 
-                    //var reader = new NpgsqlDataReader(this, behavior, _statements, sendTask);
                     var reader = connector.DataReader;
                     reader.Init(this, behavior, _statements, sendTask);
                     connector.CurrentReader = reader;
