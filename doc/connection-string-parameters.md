@@ -40,15 +40,16 @@ Below are the connection string parameters which Npgsql understands.
 
 ## Timeouts and Keepalive
 
-| Parameter                | Description                                                  | Default                      |
-|--------------------------|--------------------------------------------------------------|------------------------------|
-| Timeout                  | The time to wait (in seconds) while trying to establish a connection before terminating the attempt and generating an error. | 15 |
-| Command Timeout          | The time to wait (in seconds) while trying to execute a command before terminating the attempt and generating an error. Set to zero for infinity. | 30 |
-| Internal Command Timeout | The time to wait (in seconds) while trying to execute a an internal command before terminating the attempt and generating an error. -1 uses CommandTimeout, 0 means no timeout. | -1 |
-| Keepalive                | The number of seconds of connection inactivity before Npgsql sends a keepalive query. | disabled |
-| Tcp Keepalive            | Whether to use TCP keepalive with system defaults if overrides isn't specified. | disabled |
-| Tcp Keepalive Time       | The number of milliseconds of connection inactivity before a TCP keepalive query is sent. Use of this option is discouraged, use KeepAlive instead if possible. Supported only on Windows. | disabled |
-| Tcp Keepalive Interval   | The interval, in milliseconds, between when successive keep-alive packets are sent if no acknowledgement is received. TcpKeepAliveTime must be non-zero as well. Supported only on Windows. | value of TcpKeepAliveTime |
+| Parameter                 | Description                                                  | Default                      |
+|---------------------------|--------------------------------------------------------------|------------------------------|
+| Timeout                   | The time to wait (in seconds) while trying to establish a connection before terminating the attempt and generating an error. | 15 |
+| Command Timeout           | The time to wait (in seconds) while trying to execute a command before terminating the attempt and generating an error. Set to zero for infinity. | 30 |
+| Internal Command Timeout  | The time to wait (in seconds) while trying to execute a an internal command before terminating the attempt and generating an error. -1 uses CommandTimeout, 0 means no timeout. | -1 |
+| Keepalive                 | The number of seconds of connection inactivity before Npgsql sends a keepalive query. | disabled |
+| Tcp Keepalive             | Whether to use TCP keepalive with system defaults if overrides isn't specified. | disabled |
+| Tcp Keepalive Time        | The number of seconds of connection inactivity before a TCP keepalive query is sent. | Platform-dependent |
+| Tcp Keepalive Interval    | The interval, in seconds, between when successive keep-alive packets are sent if no acknowledgement is received. | Platform-dependent |
+| Tcp Keepalive Retry Count | The maximum number of keepalive probes TCP should send before dropping the connection. | Platform-dependent |
 
 ## Performance
 

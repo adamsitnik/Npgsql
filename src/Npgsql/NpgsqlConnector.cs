@@ -756,6 +756,17 @@ namespace Npgsql
 
             if (Settings.TcpKeepAlive)
                 socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+
+            // Advanced TCP keepalive options.
+            // Portable support for time, interval and retry count was only added to .NET Core 3.0.
+#if !NET461 && !NETSTANDARD2_0 && !NETSTANDARD2_1
+            if (Settings.TcpKeepAliveTime > 0)
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, Settings.TcpKeepAliveTime);
+            if (Settings.TcpKeepAliveInterval > 0)
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, Settings.TcpKeepAliveInterval);
+            if (Settings.TcpKeepAliveRetryCount > 0)
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, Settings.TcpKeepAliveRetryCount);
+#else
             if (Settings.TcpKeepAliveInterval > 0 && Settings.TcpKeepAliveTime == 0)
                 throw new ArgumentException("If TcpKeepAliveInterval is defined, TcpKeepAliveTime must be defined as well");
             if (Settings.TcpKeepAliveTime > 0)
@@ -779,6 +790,7 @@ namespace Npgsql
                 var result = socket.IOControl(IOControlCode.KeepAliveValues, inOptionValues, null);
                 if (result != 0)
                     throw new NpgsqlException($"Got non-zero value when trying to set TCP keepalive: {result}");
+#endif
             }
         }
 
