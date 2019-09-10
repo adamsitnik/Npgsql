@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -127,20 +129,37 @@ namespace Npgsql
                     while (count > 0)
                     {
                         var toRead = Size - FilledBytes;
-
                         int read;
-                        if (async)
+
+                        if (Connector.Input == null)
                         {
-                            if (AwaitableSocket == null)  // SSL
-                                read = await Underlying.ReadAsync(Buffer, FilledBytes, toRead);
-                            else  // Non-SSL async I/O, optimized
+                            if (async)
                             {
-                                AwaitableSocket.SetBuffer(Buffer, FilledBytes, toRead);
-                                await AwaitableSocket.ReceiveAsync();
-                                read = AwaitableSocket.BytesTransferred;
-                            }
-                        } else  // Sync I/O
-                            read = Underlying.Read(Buffer, FilledBytes, toRead);
+                                if (AwaitableSocket == null)  // SSL
+                                    read = await Underlying.ReadAsync(Buffer, FilledBytes, toRead);
+                                else  // Non-SSL async I/O, optimized
+                                {
+                                    AwaitableSocket.SetBuffer(Buffer, FilledBytes, toRead);
+                                    await AwaitableSocket.ReceiveAsync();
+                                    read = AwaitableSocket.BytesTransferred;
+                                }
+                            } else  // Sync I/O
+                                read = Underlying.Read(Buffer, FilledBytes, toRead);
+                        }
+                        else
+                        {
+                            var readResult = await Connector.Input.ReadAsync();
+                            var readOnlySequence = readResult.Buffer;
+                            if (readOnlySequence.IsEmpty && readResult.IsCompleted)
+                                throw new Exception("END");
+
+                            read = (int)readOnlySequence.Length;
+                            if (read > Buffer.Length - ReadPosition)
+                                throw new Exception("Too much from pipe: " + read);
+
+                            readOnlySequence.CopyTo(new Span<byte>(Buffer, FilledBytes, read));
+                            Connector.Input.AdvanceTo(readOnlySequence.End);
+                        }
 
                         if (read == 0)
                             throw new EndOfStreamException();

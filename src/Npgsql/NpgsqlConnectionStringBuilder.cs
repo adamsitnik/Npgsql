@@ -1112,6 +1112,7 @@ namespace Npgsql
         [Description("If set to true, a pool connection's state won't be reset when it is closed (improves performance). Do not specify this unless you know what you're doing.")]
         [DisplayName("No Reset On Close")]
         [NpgsqlConnectionStringProperty]
+        [DefaultValue(true)]
         public bool NoResetOnClose
         {
             get => _noResetOnClose;
@@ -1152,6 +1153,7 @@ namespace Npgsql
         [Description("A compatibility mode for special PostgreSQL server types.")]
         [DisplayName("Server Compatibility Mode")]
         [NpgsqlConnectionStringProperty]
+        [DefaultValue(ServerCompatibilityMode.NoTypeLoading)]
         public ServerCompatibilityMode ServerCompatibilityMode
         {
             get => _serverCompatibilityMode;

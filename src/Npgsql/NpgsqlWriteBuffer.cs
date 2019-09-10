@@ -16,6 +16,8 @@ namespace Npgsql
     /// </summary>
     public sealed partial class NpgsqlWriteBuffer
     {
+        public ReadOnlySpan<byte> GetSpan() => new ReadOnlySpan<byte>(Buffer, 0, WritePosition);
+
         #region Fields and Properties
 
         internal readonly NpgsqlConnector Connector;

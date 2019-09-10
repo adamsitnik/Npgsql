@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
@@ -18,6 +19,7 @@ using Npgsql.BackendMessages;
 using Npgsql.Logging;
 using Npgsql.TypeMapping;
 using Npgsql.Util;
+using Pipelines.Sockets.Unofficial;
 using static Npgsql.Util.Statics;
 
 namespace Npgsql
@@ -29,6 +31,10 @@ namespace Npgsql
     sealed partial class NpgsqlConnector : IDisposable
     {
         #region Fields and Properties
+
+        SocketConnection _socketConnection = null!;
+        internal PipeReader Input = null!;
+        internal PipeWriter Output = null!;
 
         /// <summary>
         /// The physical connection socket to the backend.
@@ -406,6 +412,11 @@ namespace Npgsql
                     GenerateResetMessage();
                 Counters.NumberOfNonPooledConnections.Increment();
                 Counters.HardConnectsPerSecond.Increment();
+
+                _socketConnection = SocketConnection.Create(_socket, PipeOptions.Default, PipeOptions.Default);
+                Input = _socketConnection.Input;
+                Output = _socketConnection.Output;
+
                 Log.Trace($"Opened connection to {Host}:{Port}");
 
                 // If an exception occurs during open, Break() below shouldn't close the connection, which would also
@@ -874,7 +885,7 @@ namespace Npgsql
                 try
                 {
                     ReceiveTimeout = UserTimeout;
-                    
+
                     while (true)
                     {
                         await ReadBuffer.Ensure(5, async, readingNotifications2);

@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Globalization;
+using System.IO.Pipelines;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
 using Npgsql.TypeMapping;
@@ -824,7 +825,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
 
             await connector.WriteSync(async);
-            await connector.Flush(async);
+
+            var output = connector.Output;
+            var byteCount = connector.WriteBuffer.WritePosition;
+            connector.WriteBuffer.GetSpan().CopyTo(output.GetSpan(byteCount));
+            output.Advance(byteCount);
+            await output.FlushAsync();
+
+            connector.WriteBuffer.WritePosition = 0;
+
+            //await connector.Flush(async);
 
             CleanupSend();
         }
