@@ -5,12 +5,20 @@
     <PackageTags>npgsql postgresql postgres ado ado.net database sql</PackageTags>
     <!-- At this point we target netcoreapp3.0 to avoid taking a dependency on System.Text.Json, which is
          necessary for all other TFMs. -->
-    <TargetFrameworks>net461;netstandard2.0;netstandard2.1;netcoreapp3.0</TargetFrameworks>
+    <TargetFrameworks>netcoreapp3.0</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+<!--
   <ItemGroup>
+    <ProjectReference Include="/home/roji/projects/Pipelines.Sockets.Unofficial/src/Pipelines.Sockets.Unofficial/Pipelines.Sockets.Unofficial.csproj" />
+  </ItemGroup>
+-->
+  <ItemGroup>
+<!--
     <PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.0.25" />
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="4.6.0-preview9.19421.4 " />
+-->
+    <PackageReference Include="System.IO.Pipelines" Version="4.6.0-preview9.19421.4" />
   </ItemGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'net461' ">
     <Reference Include="System.Transactions" Pack="false" />
