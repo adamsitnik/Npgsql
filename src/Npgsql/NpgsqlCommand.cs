@@ -101,7 +101,7 @@ namespace Npgsql
         public NpgsqlCommand(string cmdText, NpgsqlConnection connection, NpgsqlTransaction transaction)
         {
             GC.SuppressFinalize(this);
-            _statements = new List<NpgsqlStatement>(1);
+            _statements = new List<NpgsqlStatement>(64);
             _parameters = new NpgsqlParameterCollection();
             _commandText = cmdText;
             _connection = connection;
@@ -821,9 +821,10 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
                 if (pStatement != null)
                     pStatement.LastUsed = DateTime.UtcNow;
+
+                await connector.WriteSync(async);
             }
 
-            await connector.WriteSync(async);
             await connector.Flush(async);
 
             CleanupSend();
@@ -1150,6 +1151,10 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // to prevents a dependency on the thread pool (which would also trigger deadlocks).
                     // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
                     // send functions can switch to the special async mode when needed.
+
+                    for (var i = 0; i < 31; i++)
+                        _statements.Add(_statements[0]);
+
                     sendTask = (behavior & CommandBehavior.SchemaOnly) == 0
                         ? SendExecute(connector, async)
                         : SendExecuteSchemaOnly(connector, async);

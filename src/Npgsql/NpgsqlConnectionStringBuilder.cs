@@ -1152,6 +1152,7 @@ namespace Npgsql
         [Description("A compatibility mode for special PostgreSQL server types.")]
         [DisplayName("Server Compatibility Mode")]
         [NpgsqlConnectionStringProperty]
+        [DefaultValue(ServerCompatibilityMode.NoTypeLoading)]
         public ServerCompatibilityMode ServerCompatibilityMode
         {
             get => _serverCompatibilityMode;
@@ -1161,7 +1162,7 @@ namespace Npgsql
                 SetValue(nameof(ServerCompatibilityMode), value);
             }
         }
-        ServerCompatibilityMode _serverCompatibilityMode;
+        ServerCompatibilityMode _serverCompatibilityMode = ServerCompatibilityMode.NoTypeLoading;
 
         /// <summary>
         /// Makes MaxValue and MinValue timestamps and dates readable as infinity and negative infinity.

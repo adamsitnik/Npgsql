@@ -31,11 +31,14 @@ namespace Npgsql.Tests
         public async Task Reader()
         {
             using (var conn = OpenConnection())
-            using (var cmd = new NpgsqlCommand("SELECT 1", conn))
-            using (var reader = await cmd.ExecuteReaderAsync())
+            using (var cmd = new NpgsqlCommand("SELECT 8, 'hello'", conn))
+            using (var reader = await cmd.ExecuteReaderAsync(CommandBehavior.CloseConnection))
             {
-                await reader.ReadAsync();
-                Assert.That(reader[0], Is.EqualTo(1));
+                while (await reader.ReadAsync())
+                {
+                    var x = reader.GetInt32(0);
+                    var y = reader.GetString(1);
+                }
             }
         }
 

@@ -257,6 +257,8 @@ namespace Npgsql
             {
                 var msg2 = await ReadMessage(async);
                 ProcessMessage(msg2);
+                if (msg2.Code == BackendMessageCode.CompletedResponse)
+                    Expect<ReadyForQueryMessage>(await ReadMessage(async), Connector);
                 return msg2.Code == BackendMessageCode.DataRow;
             }
             catch (PostgresException)
@@ -356,6 +358,7 @@ namespace Npgsql
                     case BackendMessageCode.CompletedResponse:
                     case BackendMessageCode.EmptyQueryResponse:
                         ProcessMessage(completedMsg);
+                        Expect<ReadyForQueryMessage>(await Connector.ReadMessage(async), Connector);
                         break;
                     default:
                         continue;
@@ -444,6 +447,7 @@ namespace Npgsql
                     {
                     case BackendMessageCode.CompletedResponse:
                     case BackendMessageCode.EmptyQueryResponse:
+                        Expect<ReadyForQueryMessage>(await ReadMessage(async), Connector);
                         break;
                     default:
                         throw Connector.UnexpectedMessageReceived(msg.Code);
@@ -472,7 +476,9 @@ namespace Npgsql
                 switch (msg.Code)
                 {
                 case BackendMessageCode.DataRow:
+                    break;
                 case BackendMessageCode.CompletedResponse:
+                    Expect<ReadyForQueryMessage>(await ReadMessage(async), Connector);
                     break;
                 default:
                     throw Connector.UnexpectedMessageReceived(msg.Code);
@@ -482,7 +488,7 @@ namespace Npgsql
             }
 
             // There are no more queries, we're done. Read to the RFQ.
-            ProcessMessage(Expect<ReadyForQueryMessage>(await Connector.ReadMessage(async), Connector));
+            //ProcessMessage(Expect<ReadyForQueryMessage>(await Connector.ReadMessage(async), Connector));
             RowDescription = null;
             return false;
         }

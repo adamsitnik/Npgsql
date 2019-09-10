@@ -115,7 +115,7 @@ namespace Npgsql
 
             Settings = settings;
 
-            _max = settings.MaxPoolSize;
+            _max = 16;
             _min = settings.MinPoolSize;
 
             UserFacingConnectionString = settings.PersistSecurityInfo
