@@ -821,6 +821,9 @@ namespace Npgsql
             Connector.EndUserAction();
             NpgsqlEventSource.Log.CommandStop();
 
+            Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{Connector.Id:0000000}|{Command.CommandId:00000}]: Completed read");
+            Connector.ReaderCompleted.TrySetResult(null);
+
             // If the reader is being closed as part of the connection closing, we don't apply
             // the reader's CommandBehavior.CloseConnection
             if (_behavior.HasFlag(CommandBehavior.CloseConnection) && !connectionClosing)

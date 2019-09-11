@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -35,6 +36,10 @@ namespace Npgsql
         SocketConnection _socketConnection = null!;
         internal PipeReader Input = null!;
         internal PipeWriter Output = null!;
+
+        internal ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)> Pending = new ConcurrentQueue<(NpgsqlCommand, TaskCompletionSource<object>)>();
+        //internal ReusableAwaiter<object> ReaderCompleted { get; } = new ReusableAwaiter<object>();
+        internal TaskCompletionSource<object> ReaderCompleted { get; private set; }
 
         /// <summary>
         /// The physical connection socket to the backend.
@@ -429,6 +434,35 @@ namespace Npgsql
             {
                 Break();
                 throw;
+            }
+
+#pragma warning disable 4014
+            MainReadLoop();
+#pragma warning restore 4014
+        }
+
+        async Task MainReadLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await ReadBuffer.Ensure(5, true);
+                    if (!Pending.TryDequeue(out var tup))
+                        throw new Exception("Got message(s) from PostgreSQL but no command is pending");
+                    var (cmd, tcs) = tup;
+                    //ReaderCompleted.Reset();
+                    ReaderCompleted = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{Id:0000000}|{cmd.CommandId:00000}]: Releasing for read. Pending commands: "
+                        + string.Join(",", Pending.Select(p => p.Item1.CommandId)));
+                    tcs.SetResult(null);
+                    await ReaderCompleted.Task;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Error("Exception in main read loop", e, Id);
+                Break();
             }
         }
 

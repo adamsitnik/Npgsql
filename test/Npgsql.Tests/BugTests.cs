@@ -39,8 +39,6 @@ namespace Npgsql.Tests
                 {
                     try
                     {
-                        if (i == 1326)
-                            Console.WriteLine("BOOM");
                         using (var cmd2 = new NpgsqlCommand("SELECT * FROM data", conn))
                         using (var reader = await cmd2.ExecuteReaderAsync())
                             while (await reader.ReadAsync())
@@ -72,7 +70,7 @@ namespace Npgsql.Tests
             }
 
             await Task.WhenAll(Enumerable
-                .Range(0, 8)
+                .Range(0, 2)
                 .Select(t => Task.Run(async () =>
                 {
                     var sum = 0;
@@ -96,6 +94,45 @@ namespace Npgsql.Tests
 //            if (NpgsqlConnector.NumFlushes > 0)
 //                Console.WriteLine($"{NpgsqlConnector.NumCommandsWritten} commands written in {NpgsqlConnector.NumFlushes} flushes, " + "" +
 //                                  $"avg {NpgsqlConnector.NumCommandsWritten/NpgsqlConnector.NumFlushes} cmds/flush");
+        }
+
+        [Test]
+        public async Task MultiplexingPilotConcurrentTestSync()
+        {
+            var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
+            {
+                MaxPoolSize = 1,
+                MaxAutoPrepare = 20,
+                AutoPrepareMinUsages = 5
+            }.ToString();
+
+            using (var conn = OpenConnection(connString))
+            {
+                conn.ExecuteNonQuery("DROP TABLE IF EXISTS data");
+                conn.ExecuteNonQuery("CREATE TABLE data (name TEXT)");
+            }
+
+            await Task.WhenAll(Enumerable
+                .Range(0, 8)
+                .Select(t => Task.Run(() =>
+                {
+                    var sum = 0;
+                    for (var i = 0; i < 100000; i++)
+                    {
+                        using (var conn = new NpgsqlConnection(connString))
+                        {
+                            conn.Open();
+                            using (var cmd = new NpgsqlCommand("SELECT name FROM data", conn))
+                            using (var reader = cmd.ExecuteReader())
+                                while (reader.Read())
+                                    unchecked
+                                    {
+                                        sum += reader.GetString(0).Length;
+                                    }
+                        }
+                    }
+                    return sum;
+                })));
         }
 
         #region Sequential reader bugs

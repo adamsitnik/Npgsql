@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -30,7 +31,16 @@ namespace Npgsql
     {
         #region Fields
 
+        static int _commandIdCounter;
+        internal int CommandId;
         NpgsqlConnection? _connection;
+
+        [ThreadStatic]
+        static NpgsqlConnector _multiplexingConnector;
+
+        static ThreadLocal<NpgsqlConnector> _multiplexingConnector2 = new ThreadLocal<NpgsqlConnector>();
+
+        static ConcurrentDictionary<int, NpgsqlConnector> _multiplexingConnector3 = new ConcurrentDictionary<int, NpgsqlConnector>();
 
         /// <summary>
         /// If this command is (explicitly) prepared, references the connector on which the preparation happened.
@@ -108,6 +118,7 @@ namespace Npgsql
             _connection = connection;
             Transaction = transaction;
             CommandType = CommandType.Text;
+            CommandId = Interlocked.Increment(ref _commandIdCounter);
         }
 
         #endregion Constructors
@@ -1089,8 +1100,35 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         async ValueTask<NpgsqlDataReader> ExecuteReaderAsync(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
-            var connector = CheckReadyAndGetConnector();
-            connector.StartUserAction(this);
+            //var connector = CheckReadyAndGetConnector();
+            NpgsqlConnector connector;
+//            if (_multiplexingConnector == null)
+//            {
+//                connector = new NpgsqlConnector(_connection);
+//                await connector.Open(NpgsqlTimeout.Infinite, async, cancellationToken);
+//                _multiplexingConnector = connector;
+//                Tov.Log($"[{AppDomain.GetCurrentThreadId():0000}|{connector.Id:0000000}|{CommandId:00000}]: SETTING FIRST TIME");
+//            }
+//            else
+//                connector = _connection.Connector = _multiplexingConnector2.Value;
+//            if (!_multiplexingConnector2.IsValueCreated)
+//            {
+//                connector = new NpgsqlConnector(_connection);
+//                await connector.Open(NpgsqlTimeout.Infinite, async, cancellationToken);
+//                _multiplexingConnector2.Value = connector;
+//                Tov.Log($"[{AppDomain.GetCurrentThreadId():0000}|{connector.Id:0000000}|{CommandId:00000}]: SETTING FIRST TIME");
+//            }
+            connector = _connection.Connector = _multiplexingConnector3.GetOrAdd(Thread.CurrentThread.ManagedThreadId, threadId =>
+            {
+                var c = new NpgsqlConnector(_connection);
+                c.Open(NpgsqlTimeout.Infinite, false, CancellationToken.None).Wait();
+                Tov.Log($"[{AppDomain.GetCurrentThreadId():0000}|{c.Id:0000000}|{CommandId:00000}]: SETTING FIRST TIME");
+                return c;
+            });
+
+            Tov.Log($"[{AppDomain.GetCurrentThreadId():0000}|{connector.Id:0000000}|{CommandId:00000}]: Starting execute");
+
+            //connector.StartUserAction(this);
             try
             {
                 using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd!).Cancel(), this))
@@ -1160,6 +1198,11 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // to prevents a dependency on the thread pool (which would also trigger deadlocks).
                     // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
                     // send functions can switch to the special async mode when needed.
+
+                    Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{connector.Id:0000000}|{CommandId:00000}]: Enqueueing");
+                    var tcs = new TaskCompletionSource<object>();
+                    connector.Pending.Enqueue((this, tcs));
+
                     sendTask = (behavior & CommandBehavior.SchemaOnly) == 0
                         ? SendExecute(connector, async)
                         : SendExecuteSchemaOnly(connector, async);
@@ -1170,14 +1213,44 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     if (sendTask.IsFaulted)
                         sendTask.GetAwaiter().GetResult();
 
-                    var reader = connector.DataReader;
-                    reader.Init(this, behavior, _statements, sendTask);
-                    connector.CurrentReader = reader;
                     if (async)
-                        await reader.NextResultAsync(cancellationToken);
+                    {
+                        Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{connector.Id:0000000}|{CommandId:00000}]: Awaiting");
+                        await tcs.Task;
+                        Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{connector.Id:0000000}|{CommandId:00000}]: Starting read");
+                        var reader = connector.DataReader;
+                        reader.Init(this, behavior, _statements, Task.CompletedTask);
+                        try
+                        {
+                            await reader.NextResultAsync(cancellationToken);
+                        }
+                        catch
+                        {
+                            Tov.Log($"[{Thread.CurrentThread.ManagedThreadId:0000}|{connector.Id:0000000}|{CommandId:00000}]: EXCEPTION");
+                            throw;
+                        }
+
+                        return reader;
+                    }
                     else
+                    {
+                        if (!tcs.Task.Wait(TimeSpan.FromSeconds(5)))
+                        {
+                            Console.WriteLine("Timed out");
+                        }
+                        var reader = connector.DataReader;
+                        reader.Init(this, behavior, _statements, Task.CompletedTask);
                         reader.NextResult();
-                    return reader;
+                        return reader;
+                    }
+//                    var reader = connector.DataReader;
+//                    reader.Init(this, behavior, _statements, sendTask);
+//                    connector.CurrentReader = reader;
+//                    if (async)
+//                        await reader.NextResultAsync(cancellationToken);
+//                    else
+//                        reader.NextResult();
+//                    return reader;
                 }
             }
             catch
