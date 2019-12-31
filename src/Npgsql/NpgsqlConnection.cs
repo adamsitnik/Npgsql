@@ -58,9 +58,9 @@ namespace Npgsql
 
         static readonly NpgsqlConnectionStringBuilder DefaultSettings = new NpgsqlConnectionStringBuilder();
 
-        ConnectorPool? _pool;
+        internal ConnectorPool? _pool;
 
-        bool _wasBroken;
+        //bool _wasBroken;
 
         internal Transaction? EnlistedTransaction { get; set; }
 
@@ -184,6 +184,8 @@ namespace Npgsql
         }
 
         Task Open(bool async, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+#if MULTIPLEXING
         {
             // This is an optimized path for when a connection can be taken from the pool
             // with no waiting or I/O
@@ -301,6 +303,7 @@ namespace Npgsql
                 OnStateChange(ClosedToOpenEventArgs);
             }
         }
+#endif
 
         #endregion Open / Init
 
@@ -420,6 +423,8 @@ namespace Npgsql
         {
             get
             {
+                return ConnectionState.Open;
+#if MULTIPLEXING
                 if (Connector == null || _disposed)
                     return _wasBroken ? ConnectionState.Broken : ConnectionState.Closed;
 
@@ -435,6 +440,7 @@ namespace Npgsql
                     ConnectorState.Broken     => ConnectionState.Broken,
                     _ => throw new InvalidOperationException($"Internal Npgsql bug: unexpected value {Connector.State} of enum {nameof(ConnectorState)}. Please file a bug.")
                 };
+#endif
             }
         }
 
@@ -639,6 +645,8 @@ namespace Npgsql
         }
 
         internal Task Close(bool wasBroken, bool async)
+            => Task.CompletedTask;
+#if MULTIPLEXING
         {
             // Even though NpgsqlConnection isn't thread safe we'll make sure this part is.
             // Because we really don't want double returns to the pool.
@@ -692,6 +700,7 @@ namespace Npgsql
                 connection.OnStateChange(OpenToClosedEventArgs);
             }
         }
+#endif
 
         /// <summary>
         /// Releases all resources used by the <see cref="NpgsqlConnection">NpgsqlConnection</see>.
@@ -1279,6 +1288,17 @@ namespace Npgsql
             if (conn == null)
                 throw new InvalidOperationException("Connection is not open");
             return conn;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ConnectorPool CheckReadyAndGetPool()
+        {
+            CheckDisposed();
+
+            // This method gets called outside any lock, and might be in a race condition
+            // with an ongoing keepalive, which may break the connector (setting the connection's
+            // Connector to null). We capture the connector to the stack and return it here.
+            return _pool!;
         }
 
         #endregion State checks

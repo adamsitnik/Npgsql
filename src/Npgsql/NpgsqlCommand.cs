@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Globalization;
+using System.Threading.Tasks.Sources;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
 using Npgsql.TypeMapping;
@@ -42,7 +43,7 @@ namespace Npgsql
         int? _timeout;
         readonly NpgsqlParameterCollection _parameters;
 
-        readonly List<NpgsqlStatement> _statements;
+        internal readonly List<NpgsqlStatement> _statements;
 
         /// <summary>
         /// Returns details about each statement that this command has executed.
@@ -107,6 +108,7 @@ namespace Npgsql
             _connection = connection;
             Transaction = transaction;
             CommandType = CommandType.Text;
+            Id = Interlocked.Increment(ref _nextCommandId);
         }
 
         #endregion Constructors
@@ -662,7 +664,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         #region Query analysis
 
-        void ProcessRawQuery(bool deriveParameters = false)
+        internal void ProcessRawQuery(bool deriveParameters = false)
         {
             if (string.IsNullOrEmpty(CommandText))
                 throw new InvalidOperationException("CommandText property has not been initialized");
@@ -781,9 +783,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 SynchronizationContext.SetSynchronizationContext(null);
         }
 
-        async Task SendExecute(NpgsqlConnector connector, bool async)
+        internal async Task SendExecute(NpgsqlConnector connector, bool async)
         {
-            BeginSend();
+            //BeginSend();
 
             for (var i = 0; i < _statements.Count; i++)
             {
@@ -820,9 +822,9 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             }
 
             await connector.WriteSync(async);
-            await connector.Flush(async);
+            //await connector.Flush(async);
 
-            CleanupSend();
+            //CleanupSend();
         }
 
         async Task SendExecuteSchemaOnly(NpgsqlConnector connector, bool async)
@@ -1073,12 +1075,45 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 return ExecuteReaderAsync(behavior, async: true, cancellationToken).AsTask();
         }
 
+        // TODO: Maybe just return an NpgsqlDataReader and handle the reader initialization in the read loop?
+        internal ManualResetValueTaskSource<object?> ExecutionCompletion { get; } = new ManualResetValueTaskSource<object?>();
+
+        internal long Id;
+        static long _nextCommandId = 1;
+
         async ValueTask<NpgsqlDataReader> ExecuteReaderAsync(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
-            var connector = CheckReadyAndGetConnector();
-            connector.StartUserAction(this);
+            var pool = CheckReadyAndGetPool();
+
+            //var connector = CheckReadyAndGetConnector();
+            //connector.StartUserAction(this);
             try
             {
+                // TODO: Experiment: do we want to wait on *writing* here, or on *reading*?
+                // Previous behavior was to wait on reading, which throw the exception from ExecuteReader (and not from
+                // the first read). But waiting on writing would allow us to do sync writing and async reading.
+                ExecutionCompletion.Reset();
+                CrappyLog.Write($"CMD{Id:00000}|CON?????: Enqueueing");
+                var written = pool.PendingCommands.Writer.TryWrite(this);
+                Debug.Assert(written);
+                await new ValueTask<object?>(ExecutionCompletion, ExecutionCompletion.Version);
+
+                var connector = Connection!.Connector!;
+
+                CrappyLog.Write($"CMD{Id:00000}|CON{connector.Id:00000}: execution completion");
+
+                var reader = connector.DataReader;
+                reader.Init(this, behavior, _statements);
+                connector.CurrentReader = reader;
+                if (async)
+                    await reader.NextResultAsync(cancellationToken);
+                else
+                    reader.NextResult();
+
+                CrappyLog.Write($"CMD{Id:00000}|CON{connector.Id:00000}: returning reader");
+                return reader;
+
+#if PRE_MULTIPLEXING
                 using (cancellationToken.Register(cmd => ((NpgsqlCommand)cmd!).Cancel(), this))
                 {
                     ValidateParameters(connector.TypeMapper);
@@ -1129,7 +1164,6 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     if (Log.IsEnabled(NpgsqlLogLevel.Debug))
                         LogCommand(connector.Id);
                     NpgsqlEventSource.Log.CommandStart(CommandText);
-                    Task sendTask;
 
                     // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
                     lock (connector.CancelLock) { }
@@ -1146,7 +1180,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // to prevents a dependency on the thread pool (which would also trigger deadlocks).
                     // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
                     // send functions can switch to the special async mode when needed.
-                    sendTask = (behavior & CommandBehavior.SchemaOnly) == 0
+                    var sendTask = (behavior & CommandBehavior.SchemaOnly) == 0
                         ? SendExecute(connector, async)
                         : SendExecuteSchemaOnly(connector, async);
 
@@ -1165,6 +1199,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                         reader.NextResult();
                     return reader;
                 }
+#endif
             }
             catch
             {
@@ -1172,8 +1207,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                 _connection!.Connector?.EndUserAction();
 
                 // Close connection if requested even when there is an error.
-                if ((behavior & CommandBehavior.CloseConnection) == CommandBehavior.CloseConnection)
-                    _connection.Close();
+                // if ((behavior & CommandBehavior.CloseConnection) == CommandBehavior.CloseConnection)
+                //     _connection.Close();
                 throw;
             }
         }
@@ -1300,6 +1335,16 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             if (_connection == null)
                 throw new InvalidOperationException("Connection property has not been initialized.");
             return _connection.CheckReadyAndGetConnector();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        ConnectorPool CheckReadyAndGetPool()
+        {
+            if (State == CommandState.Disposed)
+                throw new ObjectDisposedException(GetType().FullName);
+            if (_connection == null)
+                throw new InvalidOperationException("Connection property has not been initialized.");
+            return _connection.CheckReadyAndGetPool();
         }
 
         #endregion

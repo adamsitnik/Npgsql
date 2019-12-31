@@ -1152,6 +1152,7 @@ namespace Npgsql
         [Description("A compatibility mode for special PostgreSQL server types.")]
         [DisplayName("Server Compatibility Mode")]
         [NpgsqlConnectionStringProperty]
+        [DefaultValue(ServerCompatibilityMode.NoTypeLoading)]
         public ServerCompatibilityMode ServerCompatibilityMode
         {
             get => _serverCompatibilityMode;
