@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using System.Transactions;
 using Npgsql.Logging;
@@ -20,6 +22,147 @@ namespace Npgsql
     /// </summary>
     sealed class ConnectorPool : IDisposable
     {
+        #region New multiplexing stuff
+
+        internal Channel<NpgsqlCommand> PendingCommands { get; } = Channel.CreateUnbounded<NpgsqlCommand>(
+            new UnboundedChannelOptions { SingleReader = true });
+
+        int _totalConnectors;
+
+        internal long NumCommandsSent;
+        internal long NumFlushes;
+
+        const int CoalesceWriteDelayMs = 1;
+
+        async void WriteLoop()
+        {
+            var autoPrepare = Settings.MaxAutoPrepare > 0;
+
+            // TODO: Writing I/O here is currently async-only. Experiment with both sync and async (based on user
+            // preference, ExecuteReader vs. ExecuteReaderAsync).
+            var reader = PendingCommands.Reader;
+
+            while (await reader.WaitToReadAsync())
+            {
+                NpgsqlConnector connector;
+                try
+                {
+                    if (!IdleMultiplexedConnectors.TryDequeue(out var newConnector))
+                    {
+                        if (_totalConnectors == _max)
+                            CrappyLog.Write($"Bypassed max connections {_max}");
+
+                        // TODO: Look again at making NpgsqlConnector autonomous without NpgsqlConnection
+                        var tempConn = new NpgsqlConnection(_connectionString);
+                        newConnector = new NpgsqlConnector(tempConn) { ClearCounter = _clearCounter };
+
+                        await newConnector.Open(
+                            new NpgsqlTimeout(TimeSpan.FromSeconds(Settings.Timeout)),
+                            true,
+                            CancellationToken.None);
+
+                        Interlocked.Increment(ref _totalConnectors);
+                        AllConnectors.Add(newConnector);
+                    }
+
+                    connector = newConnector;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Exception opening a connection" + ex);
+                    Log.Error("Exception opening a connection", ex);
+                    return;
+                }
+
+                try
+                {
+                    CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: Connector being prepared");
+                    var numCommandsWritten = 0;
+                    while (reader.TryRead(out var command))
+                    {
+                        command.Connection!.Connector = connector;
+
+                        // TODO: Need to flow the behavior (SchemaOnly support etc.), cancellation token, async-ness (?)...
+                        // TODO: Stop at some point even if there are pending commands (otherwise we could continue
+                        // serializing forever). Define a threshold for filling the buffer beyond which we flush.
+                        // TODO: Error handling here... everything written to the buffer must be errored,
+                        // we could dispatch later commands to another connection in the pool. We could even retry
+                        // ones that have already been tried - this means that we need to be able to write a command
+                        // twice.
+
+                        // TODO: this may actually be doable up-front, before the channel. Make SqlQueryParser stateless/static.
+                        command.ProcessRawQuery();
+
+                        if (autoPrepare)
+                        {
+                            var numPrepared = 0;
+                            foreach (var statement in command._statements)
+                            {
+                                // If this statement isn't prepared, see if it gets implicitly prepared.
+                                // Note that this may return null (not enough usages for automatic preparation).
+                                if (!statement.IsPrepared)
+                                    statement.PreparedStatement = connector.PreparedStatementManager.TryGetAutoPrepared(statement);
+                                if (statement.PreparedStatement != null)
+                                    numPrepared++;
+                            }
+                        }
+
+                        // Purposefully don't wait for I/O to complete
+                        // TODO: Different path for synchronous completion here? In the common/hot case this will return
+                        // synchronously, is it optimizing for that? That could mean we flush immediately (much like
+                        // threshold exceeded).
+                        // For the TE prototype this never occurs, so don't care.
+                        var task = command.SendExecute(connector, async: true);
+                        if (!task.IsCompletedSuccessfully)
+                            throw new Exception("When writing Execute to connector, task is in state" + task.Status);
+                        CrappyLog.Write($"CMD{command.Id:00000}|CON{connector.Id:00000}: command written to connector");
+                        connector.CommandsInFlight.Enqueue(command);
+                        numCommandsWritten++;
+                    }
+
+                    CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: flushing connector ({numCommandsWritten} commands)");
+
+#pragma warning disable 4014
+                    // Purposefully don't wait for flushing to complete. That can happen in parallel to us treating 
+                    // more commands on a different connector.
+                    // TODO: be careful to not continue sending more commands on the connector before flushing has completed
+                    connector.Flush(true);
+#pragma warning restore 4014
+
+                    Interlocked.Add(ref NumCommandsSent, numCommandsWritten);
+                    var numFlushes = Interlocked.Increment(ref NumFlushes);
+                    if (numFlushes % 100000 == 0)
+                    {
+                        Console.WriteLine(
+                            $"Commands: Average commands per flush: {(double)NumCommandsSent / NumFlushes} " +
+                            $"({NumCommandsSent}/{NumFlushes})");
+                        Console.WriteLine($"Total physical connections: {_totalConnectors}");
+                        var sb1 = new StringBuilder();
+                        var count = AllConnectors.Count;
+                        for (var i = 0; i < count; i++)
+                        {
+                            var conn = AllConnectors[i];
+                            sb1.Append(conn.CommandsFlushed).Append('|');
+                            conn.CommandsFlushed = 0;
+                        }
+                        Console.WriteLine(sb1.ToString());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Exception in write loop", ex, connector.Id);
+                    connector.Break();
+                }
+            }
+        }
+
+        internal ConcurrentQueue<NpgsqlConnector> IdleMultiplexedConnectors { get; }
+            = new ConcurrentQueue<NpgsqlConnector>();
+
+        internal List<NpgsqlConnector> AllConnectors = new List<NpgsqlConnector>(200);
+
+        #endregion
+
         #region Implementation notes
 
         // General
@@ -45,6 +188,8 @@ namespace Npgsql
         /// after the connection has been opened. Does not contain the password unless Persist Security Info=true.
         /// </summary>
         internal string UserFacingConnectionString { get; }
+
+        string _connectionString { get; }
 
         readonly int _max;
         readonly int _min;
@@ -141,11 +286,15 @@ namespace Npgsql
             _open = new NpgsqlConnector[_max];
             _waiting = new ConcurrentQueue<(TaskCompletionSource<NpgsqlConnector?> TaskCompletionSource, bool IsAsync)>();
 
+            _connectionString = connString;
+            
             UserFacingConnectionString = settings.PersistSecurityInfo
                 ? connString
                 : settings.ToStringWithoutPassword();
 
             Settings = settings;
+
+            WriteLoop();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

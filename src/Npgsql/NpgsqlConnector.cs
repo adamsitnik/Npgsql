@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -193,6 +194,8 @@ namespace Npgsql
         /// </summary>
         internal int PoolIndex { get; set; } = int.MaxValue;
 
+        ConnectorPool? _pool;
+
         internal int ClearCounter { get; set; }
 
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(NpgsqlConnector));
@@ -236,6 +239,7 @@ namespace Npgsql
             : this(connection.Settings, connection.OriginalConnectionString)
         {
             Connection = connection;
+            _pool = connection._pool;
             Connection.Connector = this;
             ProvideClientCertificatesCallback = Connection.ProvideClientCertificatesCallback;
             UserCertificateValidationCallback = Connection.UserCertificateValidationCallback;
@@ -402,6 +406,10 @@ namespace Npgsql
                 Counters.NumberOfNonPooledConnections.Increment();
                 Counters.HardConnectsPerSecond.Increment();
                 Log.Trace($"Opened connection to {Host}:{Port}");
+
+                // Each of the following invocations starts an infinite async loop, which processes outgoing and
+                // incoming traffic. They are intentionally not awaited.
+                ReadLoop();
 
                 // If an exception occurs during open, Break() below shouldn't close the connection, which would also
                 // update pool state. Instead we let the exception propagate and get handled by the calling pool code.
@@ -781,6 +789,47 @@ namespace Npgsql
 
         #endregion
 
+        #region I/O
+
+        internal readonly ConcurrentQueue<NpgsqlCommand> CommandsInFlight = new ConcurrentQueue<NpgsqlCommand>();
+        internal ManualResetValueTaskSource<object?> ReaderCompleted { get; } = new ManualResetValueTaskSource<object?>();
+
+        async void ReadLoop()
+        {
+            try
+            {
+                while (true)
+                {
+                    await ReadBuffer.Ensure(5, true);
+#if NET461 || NETSTANDARD2_0
+                    var command = CommandsInFlight.Dequeue();
+#else
+                    if (!CommandsInFlight.TryDequeue(out var command))
+                        throw new Exception("Got message(s) from PostgreSQL but no command is pending");
+#endif
+                    CrappyLog.Write($"CMD{command.Id:00000}|CON{Id:00000}: Read command on connector");
+                    ReaderCompleted.Reset();
+                    command.ExecutionCompletion.SetResult(null);
+                    await new ValueTask(ReaderCompleted, ReaderCompleted.Version);
+
+                    if (CommandsInFlight.Count == 0)
+                    {
+                        // No more pending commands - put the connection back in the pool's queue
+                        CrappyLog.Write($"CMD?????|CON{Id:00000}: Connector no more pending, returning to pool");
+                        _pool!.IdleMultiplexedConnectors.Enqueue(this);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Exception in read loop: " + ex);
+                Log.Error("Exception in read loop", ex, Id);
+                Break();
+            }
+        }
+
+        #endregion
+
         #region Frontend message processing
 
         /// <summary>
@@ -947,7 +996,7 @@ namespace Npgsql
                     if (CurrentReader != null)
                     {
                         // The reader cleanup will call EndUserAction
-                        await CurrentReader.Cleanup(async);
+                        CurrentReader.Cleanup(async);
                     }
                     else
                     {

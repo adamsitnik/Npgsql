@@ -5,7 +5,7 @@
     <PackageTags>npgsql postgresql postgres ado ado.net database sql</PackageTags>
     <!-- At this point we target netcoreapp3.0 to avoid taking a dependency on System.Text.Json, which is
          necessary for all other TFMs. -->
-    <TargetFrameworks>net461;netstandard2.0;netstandard2.1;netcoreapp3.0</TargetFrameworks>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
@@ -22,5 +22,6 @@
   </ItemGroup>
   <ItemGroup Condition=" '$(TargetFramework)' == 'net461' OR '$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1' ">
     <PackageReference Include="System.Text.Json" Version="4.6.0" />
+    <PackageReference Include="System.Threading.Channels" Version="4.7.0" />
   </ItemGroup>
 </Project>
