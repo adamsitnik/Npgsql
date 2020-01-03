@@ -608,7 +608,7 @@ WHERE table_name LIKE @p0 escape '\' AND (is_updatable = 'NO') = @p1";
         {
             var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
             {
-                MaxPoolSize = 20,
+                MaxPoolSize = 5,
                 MaxAutoPrepare = 20,
                 AutoPrepareMinUsages = 5
             }.ToString();

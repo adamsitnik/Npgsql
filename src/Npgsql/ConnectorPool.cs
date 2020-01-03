@@ -26,6 +26,7 @@ namespace Npgsql
         internal Channel<NpgsqlCommand> PendingCommands { get; } = Channel.CreateUnbounded<NpgsqlCommand>(
             new UnboundedChannelOptions { SingleReader = true });
 
+        int _extraConnectors;
         int _totalConnectors;
 
         internal long NumCommandsSent;
@@ -43,27 +44,56 @@ namespace Npgsql
 
             while (await reader.WaitToReadAsync())
             {
-                NpgsqlConnector connector;
+                NpgsqlConnector? connector;
                 try
                 {
-                    if (!IdleMultiplexedConnectors.TryDequeue(out var newConnector))
+                    if (!IdleMultiplexedConnectors.TryDequeue(out connector))
                     {
-                        if (_totalConnectors == _max)
-                            CrappyLog.Write($"Bypassed max connections {_max}");
+                        while (true)
+                        {
+                            var totalConnectors = _totalConnectors;
+                            if (totalConnectors == _max)
+                            {
+                                if (!BusyMultiplexedConnectors.TryDequeue(out connector))
+                                {
+                                    var tempConn = new NpgsqlConnection(_connectionString);
+                                    connector = new NpgsqlConnector(tempConn) { ClearCounter = _clearCounter };
 
-                        // TODO: Look again at making NpgsqlConnector autonomous without NpgsqlConnection
-                        var tempConn = new NpgsqlConnection(_connectionString);
-                        newConnector = new NpgsqlConnector(tempConn) { ClearCounter = _clearCounter };
+                                    await connector.Open(
+                                        new NpgsqlTimeout(TimeSpan.FromSeconds(Settings.Timeout)),
+                                        true,
+                                        CancellationToken.None);
+                                    
+                                    AllConnectors.Add(connector);
 
-                        await newConnector.Open(
-                            new NpgsqlTimeout(TimeSpan.FromSeconds(Settings.Timeout)),
-                            true,
-                            CancellationToken.None);
+                                    Interlocked.Increment(ref _extraConnectors);
+                                }
+                            }
+                            else
+                            {
+                                if (Interlocked.CompareExchange(
+                                        ref _totalConnectors,
+                                        totalConnectors + 1,
+                                        totalConnectors) != totalConnectors)
+                                {
+                                    continue;
+                                }
 
-                        Interlocked.Increment(ref _totalConnectors);
+                                // TODO: Look again at making NpgsqlConnector autonomous without NpgsqlConnection
+                                var tempConn = new NpgsqlConnection(_connectionString);
+                                connector = new NpgsqlConnector(tempConn) { ClearCounter = _clearCounter };
+
+                                await connector.Open(
+                                    new NpgsqlTimeout(TimeSpan.FromSeconds(Settings.Timeout)),
+                                    true,
+                                    CancellationToken.None);
+                                
+                                AllConnectors.Add(connector);
+                            }
+
+                            break;
+                        }
                     }
-
-                    connector = newConnector;
                 }
                 catch (Exception ex)
                 {
@@ -71,11 +101,14 @@ namespace Npgsql
                     return;
                 }
 
+                // Debug.Assert(connector != null);  // Can't assert because of old TFMs...
+                if (connector == null)
+                    throw new Exception("WAT");
+                
                 try
                 {
                     CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: Connector being prepared");
                     var numCommandsWritten = 0;
-                    //var timeout = new NpgsqlTimeout(TimeSpan.FromMilliseconds(CoalesceWriteDelayMs));
                     while (reader.TryRead(out var command))
                     {
                         command.Connection!.Connector = connector;
@@ -116,17 +149,6 @@ namespace Npgsql
                         numCommandsWritten++;
                     }
 
-                    // This is only necessary if we do multiple consumers
-                    // if (numCommandsWritten == 0)
-                    //     continue;
-
-                    // while (!timeout.HasExpired && await reader.WaitToReadAsync())
-                    // {
-                    //     while (reader.TryRead(out var command))
-                    //     {
-                    //     }
-                    // }
-                    //
                     CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: flushing connector ({numCommandsWritten} commands)");
 
 #pragma warning disable 4014
@@ -143,7 +165,7 @@ namespace Npgsql
                         Console.WriteLine(
                             $"Commands: Average commands per flush: {(double)NumCommandsSent / NumFlushes} " +
                             $"({NumCommandsSent}/{NumFlushes})");
-                        Console.WriteLine($"Total physical connections: {_totalConnectors}");
+                        Console.WriteLine($"Total connections: {_totalConnectors}, extra beyond max: {_extraConnectors}");
                     }
                 }
                 catch (Exception ex)
@@ -157,6 +179,8 @@ namespace Npgsql
         internal ConcurrentQueue<NpgsqlConnector> IdleMultiplexedConnectors { get; } 
             = new ConcurrentQueue<NpgsqlConnector>();
 
+        List<NpgsqlConnector> AllConnectors { get; } = new List<NpgsqlConnector>();
+        
         #endregion
 
         #region Implementation notes

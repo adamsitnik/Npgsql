@@ -792,7 +792,7 @@ namespace Npgsql
 
         internal readonly Queue<NpgsqlCommand> CommandsInFlight = new Queue<NpgsqlCommand>();
         internal ManualResetValueTaskSource<object?> ReaderCompleted { get; } = new ManualResetValueTaskSource<object?>();
-
+        
         async void ReadLoop()
         {
             try
