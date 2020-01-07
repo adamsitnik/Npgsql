@@ -32,12 +32,16 @@ namespace Npgsql
         internal long NumCommandsSent;
         internal long NumFlushes;
 
+        bool _autoPrepare;
+        
         const int CoalesceWriteDelayMs = 1;
 
+        const int CoalescingFactor = 30;
+
+        long _ticks;
+        
         async void WriteLoop()
         {
-            var autoPrepare = Settings.MaxAutoPrepare > 0;
-
             // TODO: Writing I/O here is currently async-only. Experiment with both sync and async (based on user
             // preference, ExecuteReader vs. ExecuteReaderAsync).
             var reader = PendingCommands.Reader;
@@ -77,49 +81,23 @@ namespace Npgsql
                 try
                 {
                     CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: Connector being prepared");
-                    var numCommandsWritten = 0;
-                    while (reader.TryRead(out var command))
+
+                    var sw = Stopwatch.StartNew();
+                    
+                    int numCommandsWritten;
+                    
+                    for (numCommandsWritten = 0; numCommandsWritten < CoalescingFactor && reader.TryRead(out var command); numCommandsWritten++)
+                        HandleCommand(connector, command);
+
+                    while (numCommandsWritten < CoalescingFactor)
                     {
-                        command.Connection!.Connector = connector;
-
-                        // TODO: Need to flow the behavior (SchemaOnly support etc.), cancellation token, async-ness (?)...
-                        // TODO: Stop at some point even if there are pending commands (otherwise we could continue
-                        // serializing forever). Define a threshold for filling the buffer beyond which we flush.
-                        // TODO: Error handling here... everything written to the buffer must be errored,
-                        // we could dispatch later commands to another connection in the pool. We could even retry
-                        // ones that have already been tried - this means that we need to be able to write a command
-                        // twice.
-
-                        // TODO: this may actually be doable up-front, before the channel. Make SqlQueryParser stateless/static.
-                        command.ProcessRawQuery();
-
-                        if (autoPrepare)
-                        {
-                            var numPrepared = 0;
-                            foreach (var statement in command._statements)
-                            {
-                                // If this statement isn't prepared, see if it gets implicitly prepared.
-                                // Note that this may return null (not enough usages for automatic preparation).
-                                if (!statement.IsPrepared)
-                                    statement.PreparedStatement = connector.PreparedStatementManager.TryGetAutoPrepared(statement);
-                                if (statement.PreparedStatement != null)
-                                    numPrepared++;
-                            }
-                        }
-
-                        // Purposefully don't wait for I/O to complete
-                        // TODO: Different path for synchronous completion here? In the common/hot case this will return
-                        // synchronously, is it optimizing for that? That could mean we flush immediately (much like
-                        // threshold exceeded).
-                        // For the TE prototype this never occurs, so don't care.
-                        var task = command.SendExecute(connector, async: true);
-                        if (!task.IsCompletedSuccessfully)
-                            throw new Exception("When writing Execute to connector, task is in state" + task.Status);
-                        CrappyLog.Write($"CMD{command.Id:00000}|CON{connector.Id:00000}: command written to connector");
-                        connector.CommandsInFlight.Enqueue(command);
-                        numCommandsWritten++;
+                        await reader.WaitToReadAsync();
+                        for (; numCommandsWritten < CoalescingFactor && reader.TryRead(out var command); numCommandsWritten++)
+                            HandleCommand(connector, command);
                     }
 
+                    _ticks += sw.ElapsedTicks;
+                    
                     CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: flushing connector ({numCommandsWritten} commands)");
 
 #pragma warning disable 4014
@@ -137,6 +115,7 @@ namespace Npgsql
                             $"Commands: Average commands per flush: {(double)NumCommandsSent / NumFlushes} " +
                             $"({NumCommandsSent}/{NumFlushes})");
                         Console.WriteLine($"Total physical connections: {_totalConnectors}");
+                        Console.WriteLine($"Average flush time: {_ticks / NumFlushes}");
                         var sb1 = new StringBuilder();
                         var count = AllConnectors.Count;
                         for (var i = 0; i < count; i++)
@@ -154,6 +133,48 @@ namespace Npgsql
                     connector.Break();
                 }
             }
+        }
+
+        void HandleCommand(NpgsqlConnector connector, NpgsqlCommand command)
+        {
+            command.Connection!.Connector = connector;
+
+            // TODO: Need to flow the behavior (SchemaOnly support etc.), cancellation token, async-ness (?)...
+            // TODO: Stop at some point even if there are pending commands (otherwise we could continue
+            // serializing forever). Define a threshold for filling the buffer beyond which we flush.
+            // TODO: Error handling here... everything written to the buffer must be errored,
+            // we could dispatch later commands to another connection in the pool. We could even retry
+            // ones that have already been tried - this means that we need to be able to write a command
+            // twice.
+
+            // TODO: this may actually be doable up-front, before the channel. Make SqlQueryParser stateless/static.
+            command.ProcessRawQuery();
+
+            if (_autoPrepare)
+            {
+                var numPrepared = 0;
+                foreach (var statement in command._statements)
+                {
+                    // If this statement isn't prepared, see if it gets implicitly prepared.
+                    // Note that this may return null (not enough usages for automatic preparation).
+                    if (!statement.IsPrepared)
+                        statement.PreparedStatement =
+                            connector.PreparedStatementManager.TryGetAutoPrepared(statement);
+                    if (statement.PreparedStatement != null)
+                        numPrepared++;
+                }
+            }
+
+            // Purposefully don't wait for I/O to complete
+            // TODO: Different path for synchronous completion here? In the common/hot case this will return
+            // synchronously, is it optimizing for that? That could mean we flush immediately (much like
+            // threshold exceeded).
+            // For the TE prototype this never occurs, so don't care.
+            var task = command.SendExecute(connector, async: true);
+            if (!task.IsCompletedSuccessfully)
+                throw new Exception("When writing Execute to connector, task is in state" + task.Status);
+            CrappyLog.Write($"CMD{command.Id:00000}|CON{connector.Id:00000}: command written to connector");
+            connector.CommandsInFlight.Enqueue(command);
         }
 
         internal ConcurrentQueue<NpgsqlConnector> IdleMultiplexedConnectors { get; }
@@ -293,6 +314,7 @@ namespace Npgsql
                 : settings.ToStringWithoutPassword();
 
             Settings = settings;
+            _autoPrepare = settings.MaxAutoPrepare > 0;
 
             WriteLoop();
         }
