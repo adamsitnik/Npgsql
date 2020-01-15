@@ -34,11 +34,13 @@ namespace Npgsql
 
         bool _autoPrepare;
         
-        const int CoalesceWriteDelayMs = 1;
+        const long WriteCoalescingDelayTicks = 500000;
 
         const int CoalescingFactor = 30;
+        const int WriteCoalescingBufferThresholdBytes = 1070;
 
         long _ticks;
+        long _bytes;
         
         async void WriteLoop()
         {
@@ -84,19 +86,27 @@ namespace Npgsql
 
                     var sw = Stopwatch.StartNew();
                     
-                    int numCommandsWritten;
-                    
-                    for (numCommandsWritten = 0; numCommandsWritten < CoalescingFactor && reader.TryRead(out var command); numCommandsWritten++)
-                        HandleCommand(connector, command);
+                    var numCommandsWritten = 0;
 
-                    while (numCommandsWritten < CoalescingFactor)
+                    while (true)
                     {
-                        await reader.WaitToReadAsync();
-                        for (; numCommandsWritten < CoalescingFactor && reader.TryRead(out var command); numCommandsWritten++)
+                        if (reader.TryRead(out var command))
+                        {
                             HandleCommand(connector, command);
+                            numCommandsWritten++;
+
+                            if (connector.WriteBuffer.WritePosition >= WriteCoalescingBufferThresholdBytes)
+                                break;
+                        }
+                        
+                        if (sw.ElapsedTicks >= WriteCoalescingDelayTicks)
+                            break;
+                        
+                        await reader.WaitToReadAsync();
                     }
 
                     _ticks += sw.ElapsedTicks;
+                    _bytes += connector.WriteBuffer.WritePosition;
                     
                     CrappyLog.Write($"CMD?????|CON{connector.Id:00000}: flushing connector ({numCommandsWritten} commands)");
 
@@ -116,6 +126,7 @@ namespace Npgsql
                             $"({NumCommandsSent}/{NumFlushes})");
                         Console.WriteLine($"Total physical connections: {_totalConnectors}");
                         Console.WriteLine($"Average flush time: {_ticks / NumFlushes}");
+                        Console.WriteLine($"Average write buffer position: {_bytes / NumFlushes}");
                         var sb1 = new StringBuilder();
                         var count = AllConnectors.Count;
                         for (var i = 0; i < count; i++)
