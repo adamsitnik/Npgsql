@@ -311,10 +311,7 @@ namespace Npgsql
                 return;
 
             if (disposing && !IsCompleted)
-            {
                 _connector.CloseOngoingOperations(async: false).GetAwaiter().GetResult();
-                Rollback();
-            }
 
             IsDisposed = true;
         }
@@ -332,13 +329,8 @@ namespace Npgsql
                 return;
 
             if (!IsCompleted)
-            {
                 using (NoSynchronizationContextScope.Enter())
-                {
                     await _connector.CloseOngoingOperations(async: true);
-                    await Rollback(async: true);
-                }
-            }
 
             IsDisposed = true;
         }

@@ -74,6 +74,73 @@ namespace Npgsql.Tests
         static int _counter;
 
         /// <summary>
+        /// Creates a table with a unique name, usable for a single test, and returns an <see cref="IDisposable"/> to
+        /// drop it at the end of the test.
+        /// </summary>
+        internal static IDisposable CreateTempTable(NpgsqlConnection conn, out string tableName, string columns)
+        {
+            tableName = "temp" + Interlocked.Increment(ref _tempTableCounter);
+            conn.ExecuteNonQuery($"DROP TABLE IF EXISTS {tableName}; CREATE TABLE {tableName} ({columns})");
+            return new TableDisposer(conn, tableName);
+        }
+
+        static volatile int _tempTableCounter;
+
+        readonly struct TableDisposer : IDisposable
+        {
+            readonly NpgsqlConnection _conn;
+            readonly string _tableName;
+
+            internal TableDisposer(NpgsqlConnection conn, string tableName)
+                => (_conn, _tableName) = (conn, tableName);
+
+            public void Dispose()
+            {
+                try
+                {
+                    _conn.ExecuteNonQuery("DROP TABLE " + _tableName);
+                }
+                catch
+                {
+                    // Swallow to allow triggering exceptions to surface
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates a pool with a unique application name, usable for a single test, and returns an
+        /// <see cref="IDisposable"/> to drop it at the end of the test.
+        /// </summary>
+        internal static IDisposable CreateTempPool(string origConnectionString, out string tempConnectionString)
+            => CreateTempPool(new NpgsqlConnectionStringBuilder(origConnectionString), out tempConnectionString);
+
+        /// <summary>
+        /// Creates a pool with a unique application name, usable for a single test, and returns an
+        /// <see cref="IDisposable"/> to drop it at the end of the test.
+        /// </summary>
+        internal static IDisposable CreateTempPool(NpgsqlConnectionStringBuilder builder, out string tempConnectionString)
+        {
+            builder.ApplicationName = (builder.ApplicationName ?? "TempPool") + Interlocked.Increment(ref _tempPoolCounter);
+            tempConnectionString = builder.ConnectionString;
+            return new PoolDisposer(tempConnectionString);
+        }
+
+        static volatile int _tempPoolCounter;
+
+        readonly struct PoolDisposer : IDisposable
+        {
+            readonly string _connectionString;
+
+            internal PoolDisposer(string connectionString) => _connectionString = connectionString;
+
+            public void Dispose()
+            {
+                var conn = new NpgsqlConnection(_connectionString);
+                NpgsqlConnection.ClearPool(conn);
+            }
+        }
+
+        /// <summary>
         /// Utility to generate a bytea literal in Postgresql hex format
         /// See http://www.postgresql.org/docs/current/static/datatype-binary.html
         /// </summary>
@@ -274,6 +341,18 @@ namespace Npgsql.Tests
     {
         Prepared,
         NotPrepared
+    }
+
+    public enum PooledOrNot
+    {
+        Pooled,
+        Unpooled
+    }
+
+    public enum MultiplexingMode
+    {
+        NonMultiplexing,
+        Multiplexing
     }
 
 #if !NET461

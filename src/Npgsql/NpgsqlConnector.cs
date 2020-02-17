@@ -362,8 +362,6 @@ namespace Npgsql
         internal bool IsClosed => State == ConnectorState.Closed;
         internal bool IsBroken => State == ConnectorState.Broken;
 
-        bool _isConnecting;
-
         #endregion
 
         #region Open
@@ -378,7 +376,6 @@ namespace Npgsql
             Debug.Assert(Connection != null && Connection.Connector == this);
             Debug.Assert(State == ConnectorState.Closed);
 
-            _isConnecting = true;
             State = ConnectorState.Connecting;
 
             try {
@@ -407,17 +404,9 @@ namespace Npgsql
 
                 State = ConnectorState.Ready;
 
-                // Super hacky stuff... When
-                if (Connection.ConnectorBindingScope == ConnectorBindingScope.None)
-                {
-                    Connection.ConnectorBindingScope = ConnectorBindingScope.PhysicalConnecting;
-                    await LoadDatabaseInfo(timeout, async);
-                    Connection.ConnectorBindingScope = ConnectorBindingScope.None;
-                }
-                else
-                    await LoadDatabaseInfo(timeout, async);
+                await LoadDatabaseInfo(timeout, async);
 
-                if (Settings.Pooling && DatabaseInfo.SupportsDiscard)
+                if (Settings.Pooling && !Settings.Multiplexing && DatabaseInfo.SupportsDiscard)
                     GenerateResetMessage();
                 Log.Trace($"Opened connection to {Host}:{Port}");
 
@@ -425,12 +414,6 @@ namespace Npgsql
                 // It is intentionally not awaited.
                 if (Settings.Multiplexing)
                     _multiplexingReadLoop = ReadLoop();
-
-                // If an exception occurs during open, Break() below shouldn't close the connection, which would also
-                // update pool state. Instead we let the exception propagate and get handled by the calling pool code.
-                // We use an extra state flag because the connector's State varies during the type loading query
-                // above (Executing, Fetching...). Note also that Break() gets called from ReadMessageLong().
-                _isConnecting = false;
             }
             catch
             {
@@ -441,12 +424,18 @@ namespace Npgsql
 
         internal async Task LoadDatabaseInfo(NpgsqlTimeout timeout, bool async)
         {
+            // Super hacky stuff...
+
+            var prevBindingScope = Connection!.ConnectorBindingScope;
+            Connection.ConnectorBindingScope = ConnectorBindingScope.PhysicalConnecting;
+            using var _ = Defer(() => Connection.ConnectorBindingScope = prevBindingScope);
+
             // The type loading below will need to send queries to the database, and that depends on a type mapper
             // being set up (even if its empty)
             TypeMapper = new ConnectorTypeMapper(this);
 
             if (!NpgsqlDatabaseInfo.Cache.TryGetValue(ConnectionString, out var database))
-                NpgsqlDatabaseInfo.Cache[ConnectionString] = database = await NpgsqlDatabaseInfo.Load(Connection!, timeout, async);
+                NpgsqlDatabaseInfo.Cache[ConnectionString] = database = await NpgsqlDatabaseInfo.Load(Connection, timeout, async);
 
             DatabaseInfo = database;
             TypeMapper.Bind(DatabaseInfo);
@@ -815,7 +804,9 @@ namespace Npgsql
 
         async Task ReadLoop()
         {
+            Debug.Assert(Settings.Multiplexing);
             Debug.Assert(CommandsInFlightReader != null);
+
             try
             {
                 while (await CommandsInFlightReader.WaitToReadAsync())
@@ -1197,6 +1188,11 @@ namespace Npgsql
                 break;
             case TransactionStatus.InTransactionBlock:
             case TransactionStatus.InFailedTransactionBlock:
+                // In multiplexing mode, we can't support transaction in SQL: the connector must be removed from the
+                // writable connectors list, otherwise other commands may get written to it. So the user must tell us
+                // about the transaction via BeginTransaction.
+                if (Connection == null)
+                    throw new NotSupportedException("In multiplexing mode, transactions must be started with BeginTransaction");
                 break;
             case TransactionStatus.Pending:
                 throw new Exception($"Internal Npgsql bug: invalid TransactionStatus {nameof(TransactionStatus.Pending)} received, should be frontend-only");
@@ -1284,12 +1280,9 @@ namespace Npgsql
 
         #region Close / Reset
 
-        internal bool HasOngoingOperation => CurrentReader != null || CurrentCopyOperation != null;
-
         /// <summary>
         /// Closes ongoing operations, i.e. an open reader exists or a COPY operation still in progress, as
         /// part of a connection close.
-        /// Does nothing if the thread has been aborted - the connector will be closed immediately.
         /// </summary>
         internal async Task CloseOngoingOperations(bool async)
         {
@@ -1298,36 +1291,60 @@ namespace Npgsql
 
             if (reader != null)
                 await reader.Close(connectionClosing: true, async);
-
-            if (copyOperation == null)
-                return;
-
-            // TODO: There's probably a race condition as the COPY operation may finish on its own during the next few lines
-
-            // Note: we only want to cancel import operations, since in these cases cancel is safe.
-            // Export cancellations go through the PostgreSQL "asynchronous" cancel mechanism and are
-            // therefore vulnerable to the race condition in #615.
-            if (copyOperation is NpgsqlBinaryImporter ||
-                copyOperation is NpgsqlCopyTextWriter ||
-                copyOperation is NpgsqlRawCopyStream rawCopyStream && rawCopyStream.CanWrite)
+            else if (copyOperation != null)
             {
+                // TODO: There's probably a race condition as the COPY operation may finish on its own during the next few lines
+
+                // Note: we only want to cancel import operations, since in these cases cancel is safe.
+                // Export cancellations go through the PostgreSQL "asynchronous" cancel mechanism and are
+                // therefore vulnerable to the race condition in #615.
+                if (copyOperation is NpgsqlBinaryImporter ||
+                    copyOperation is NpgsqlCopyTextWriter ||
+                    copyOperation is NpgsqlRawCopyStream rawCopyStream && rawCopyStream.CanWrite)
+                {
+                    try
+                    {
+                        copyOperation.Cancel();
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Warn("Error while cancelling COPY on connector close", e, Id);
+                    }
+                }
+
                 try
                 {
-                    copyOperation.Cancel();
+                    copyOperation.Dispose();
                 }
                 catch (Exception e)
                 {
-                    Log.Warn("Error while cancelling COPY on connector close", e, Id);
+                    Log.Warn("Error while disposing cancelled COPY on connector close", e, Id);
                 }
             }
 
-            try
+            // Our buffer may contain unsent prepended messages (such as BeginTransaction), clear it out completely
+            WriteBuffer.Clear();
+            _pendingPrependedResponses = 0;
+
+            // Roll back pending transaction
+            switch (TransactionStatus)
             {
-                copyOperation.Dispose();
-            }
-            catch (Exception e)
-            {
-                Log.Warn("Error while disposing cancelled COPY on connector close", e, Id);
+            case TransactionStatus.Idle:
+                break;
+            case TransactionStatus.Pending:
+                // BeginTransaction() was called, but was left in the write buffer and not yet sent to server.
+                // Simulate receiving idle from the server (clearing connector binding scope in multiplexing), and
+                // just clear the transaction state.
+                ProcessNewTransactionStatus(TransactionStatus.Idle);
+                ClearTransaction();
+                break;
+            case TransactionStatus.InTransactionBlock:
+            case TransactionStatus.InFailedTransactionBlock:
+                await Rollback(async);
+                ClearTransaction();
+                break;
+            default:
+                throw new InvalidOperationException($"Internal Npgsql bug: unexpected value {TransactionStatus} of enum {nameof(TransactionStatus)}. Please file a bug.");
             }
         }
 
@@ -1393,20 +1410,7 @@ namespace Npgsql
 
                 Log.Error("Breaking connector", Id);
                 State = ConnectorState.Broken;
-                var conn = Connection;
                 Cleanup();
-
-                // We have no connection if we're broken by a keepalive occuring while the connector is in the pool
-                // When we break, we normally need to call into NpgsqlConnection to reset its state.
-                // The exception to this is when we're connecting, in which case the exception bubbles up and
-                // try/catch above takes care of everything.
-                if (conn != null && !_isConnecting)
-                {
-                    // Note that the connection's full state is usually calculated from the connector's, but in
-                    // states closed/broken the connector is null. We therefore need a way to distinguish between
-                    // Closed and Broken on the connection.
-                     conn.Close(wasBroken: true, async: false);
-                }
             }
         }
 
@@ -1522,55 +1526,14 @@ namespace Npgsql
         /// </remarks>
         internal void Reset()
         {
-            Debug.Assert(State == ConnectorState.Ready);
-
-            using var _ = Defer(() => Connection = null);
-
-            switch (State)
-            {
-            case ConnectorState.Ready:
-                break;
-            case ConnectorState.Closed:
-            case ConnectorState.Broken:
-                return;
-            case ConnectorState.Connecting:
-            case ConnectorState.Executing:
-            case ConnectorState.Fetching:
-            case ConnectorState.Copy:
-            case ConnectorState.Waiting:
-                throw new InvalidOperationException("Reset() called on connector with state " + State);
-            default:
-                throw new InvalidOperationException($"Internal Npgsql bug: unexpected value {State} of enum {nameof(ConnectorState)}. Please file a bug.");
-            }
-
-            // Our buffer may contain unsent prepended messages (such as BeginTransaction), clear it out completely
-            WriteBuffer.Clear();
-            _pendingPrependedResponses = 0;
+            Debug.Assert(IsReady);
 
             // We may have allocated an oversize read buffer, switch back to the original one
+            // TODO: Replace this with array pooling, #2326
             if (_origReadBuffer != null)
             {
                 ReadBuffer = _origReadBuffer;
                 _origReadBuffer = null;
-            }
-
-            // Must rollback transaction before sending DISCARD ALL
-            switch (TransactionStatus)
-            {
-            case TransactionStatus.Idle:
-                break;
-            case TransactionStatus.Pending:
-                // BeginTransaction() was called, but was left in the write buffer and not yet sent to server.
-                // Just clear the transaction state.
-                ClearTransaction();
-                break;
-            case TransactionStatus.InTransactionBlock:
-            case TransactionStatus.InFailedTransactionBlock:
-                Rollback(false);
-                ClearTransaction();
-                break;
-            default:
-                throw new InvalidOperationException($"Internal Npgsql bug: unexpected value {TransactionStatus} of enum {nameof(TransactionStatus)}. Please file a bug.");
             }
 
             if (!Settings.NoResetOnClose && DatabaseInfo.SupportsDiscard)

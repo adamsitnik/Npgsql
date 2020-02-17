@@ -4,9 +4,12 @@ using System.Data.Common;
 using System.Threading.Tasks;
 using Npgsql.Util;
 using NUnit.Framework;
+using static Npgsql.Tests.TestUtil;
 
 namespace Npgsql.Tests
 {
+    [TestFixture(Tests.MultiplexingMode.NonMultiplexing)]
+    [TestFixture(Tests.MultiplexingMode.Multiplexing)]
     public class TransactionTests : TestBase
     {
         [Test, Description("Basic insert within a committed transaction")]
@@ -14,11 +17,11 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 tx.Commit();
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<InvalidOperationException>());
                 tx.Dispose();
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<ObjectDisposedException>());
@@ -30,11 +33,11 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 await tx.CommitAsync();
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<InvalidOperationException>());
                 tx.Dispose();
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<ObjectDisposedException>());
@@ -46,16 +49,16 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
-                var cmd = new NpgsqlCommand("INSERT INTO data (name) VALUES ('X')", conn, tx);
+                var cmd = new NpgsqlCommand($"INSERT INTO {table} (name) VALUES ('X')", conn, tx);
                 if (prepare == PrepareOrNot.Prepared)
                     cmd.Prepare();
                 cmd.ExecuteNonQuery();
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
                 tx.Rollback();
                 Assert.That(tx.IsCompleted);
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<InvalidOperationException>());
                 tx.Dispose();
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<ObjectDisposedException>());
@@ -67,16 +70,16 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
-                var cmd = new NpgsqlCommand("INSERT INTO data (name) VALUES ('X')", conn, tx);
+                var cmd = new NpgsqlCommand($"INSERT INTO {table} (name) VALUES ('X')", conn, tx);
                 if (prepare == PrepareOrNot.Prepared)
                     cmd.Prepare();
                 cmd.ExecuteNonQuery();
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
                 await tx.RollbackAsync();
                 Assert.That(tx.IsCompleted);
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<InvalidOperationException>());
                 tx.Dispose();
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<ObjectDisposedException>());
@@ -88,9 +91,10 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
+                conn.ExecuteNonQuery($"CREATE TEMP TABLE {table} (name TEXT)");
                 var tx = conn.BeginTransaction();
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 tx.Dispose();
                 Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
             }
@@ -99,21 +103,18 @@ namespace Npgsql.Tests
         [Test]
         public void RollbackOnClose()
         {
-            var tableName = nameof(RollbackOnClose);
             using (var conn1 = OpenConnection())
             {
-                conn1.ExecuteNonQuery($"DROP TABLE IF EXISTS {tableName}");
-                conn1.ExecuteNonQuery($"CREATE TABLE {tableName} (name TEXT)");
+                using var _ = CreateTempTable(conn1, out var table, "name TEXT");
 
                 NpgsqlTransaction tx;
                 using (var conn2 = OpenConnection())
                 {
                     tx = conn2.BeginTransaction();
-                    conn2.ExecuteNonQuery($"INSERT INTO {tableName} (name) VALUES ('X')", tx);
+                    conn2.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx);
                 }
-                Assert.That(conn1.ExecuteScalar($"SELECT COUNT(*) FROM {tableName}"), Is.EqualTo(0));
+                Assert.That(conn1.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
                 Assert.That(() => tx.Connection, Throws.Exception.TypeOf<ObjectDisposedException>());
-                conn1.ExecuteNonQuery($"DROP TABLE {tableName}");
             }
         }
 
@@ -122,13 +123,13 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 Assert.That(() => conn.ExecuteNonQuery("BAD QUERY"), Throws.Exception.TypeOf<PostgresException>());
                 tx.Rollback();
                 Assert.That(tx.IsCompleted);
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
             }
         }
 
@@ -198,16 +199,23 @@ namespace Npgsql.Tests
             }
         }
 
-        [Test, Description("Makes sure that transactions started in SQL work")]
+        [Test, Description("Makes sure that transactions started in SQL work, except in multiplexing")]
         public void ViaSql()
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
+                conn.ExecuteNonQuery($"CREATE TEMP TABLE {table} (name TEXT)");
+                if (IsMultiplexing)
+                {
+                    Assert.That(() => conn.ExecuteNonQuery("BEGIN"), Throws.Exception.TypeOf<NotSupportedException>());
+                    return;
+                }
+
                 conn.ExecuteNonQuery("BEGIN");
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')");
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')");
                 conn.ExecuteNonQuery("ROLLBACK");
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
             }
         }
 
@@ -281,17 +289,16 @@ namespace Npgsql.Tests
 
         [Test, Description("Closes a (pooled) connection with a failed transaction and a custom timeout")]
         [IssueLink("https://github.com/npgsql/npgsql/issues/719")]
-        public void FailedTransactionOnCloseWithCustom()
+        public void FailedTransactionOnCloseWithCustomTimeout()
         {
             var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
             {
                 Pooling = true
             }.ToString();
-            using (var conn = new NpgsqlConnection(connString))
+            using (var conn = OpenConnection(connString))
             {
-                conn.Open();
-                var backendProcessId = conn.ProcessID;
                 conn.BeginTransaction();
+                var backendProcessId = conn.ProcessID;
                 using (var badCmd = new NpgsqlCommand("SEL", conn))
                 {
                     badCmd.CommandTimeout = NpgsqlCommand.DefaultTimeout + 1;
@@ -300,6 +307,7 @@ namespace Npgsql.Tests
                 // Connection now in failed transaction state, and a custom timeout is in place
                 conn.Close();
                 conn.Open();
+                conn.BeginTransaction();
                 Assert.That(conn.ProcessID, Is.EqualTo(backendProcessId));
                 Assert.That(conn.ExecuteScalar("SELECT 1"), Is.EqualTo(1));
             }
@@ -328,24 +336,24 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 const string name = "theSavePoint";
 
                 using (var tx = conn.BeginTransaction())
                 {
                     tx.Save(name);
 
-                    conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('savepointtest')", tx: tx);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(1));
+                    conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('savepointtest')", tx: tx);
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(1));
                     tx.Rollback(name);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(0));
-                    conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('savepointtest')", tx: tx);
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(0));
+                    conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('savepointtest')", tx: tx);
                     tx.Release(name);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(1));
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(1));
 
                     tx.Commit();
                 }
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
             }
         }
 
@@ -354,24 +362,24 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 const string name = "theSavePoint";
 
                 using (var tx = conn.BeginTransaction())
                 {
                     await tx.SaveAsync(name);
 
-                    conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('savepointtest')", tx: tx);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(1));
+                    conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('savepointtest')", tx: tx);
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(1));
                     await tx.RollbackAsync(name);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(0));
-                    conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('savepointtest')", tx: tx);
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(0));
+                    conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('savepointtest')", tx: tx);
                     await tx.ReleaseAsync(name);
-                    Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data", tx: tx), Is.EqualTo(1));
+                    Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}", tx: tx), Is.EqualTo(1));
 
                     tx.Commit();
                 }
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(1));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(1));
             }
         }
 
@@ -389,10 +397,10 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
                 Assert.That(!tx.IsCompleted);
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 Assert.That(!tx.IsCompleted);
                 tx.Commit();
                 Assert.That(tx.IsCompleted);
@@ -405,16 +413,15 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
                 Assert.That(!tx.IsCompleted);
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 Assert.That(!tx.IsCompleted);
                 tx.Rollback();
                 Assert.That(tx.IsCompleted);
             }
         }
-
 
         [Test, Description("Check IsCompleted before, during, and after a failed then rolled back transaction")]
         [IssueLink("https://github.com/npgsql/npgsql/issues/985")]
@@ -422,16 +429,16 @@ namespace Npgsql.Tests
         {
             using (var conn = OpenConnection())
             {
-                conn.ExecuteNonQuery("CREATE TEMP TABLE data (name TEXT)");
+                using var _ = CreateTempTable(conn, out var table, "name TEXT");
                 var tx = conn.BeginTransaction();
                 Assert.That(!tx.IsCompleted);
-                conn.ExecuteNonQuery("INSERT INTO data (name) VALUES ('X')", tx: tx);
+                conn.ExecuteNonQuery($"INSERT INTO {table} (name) VALUES ('X')", tx: tx);
                 Assert.That(!tx.IsCompleted);
                 Assert.That(() => conn.ExecuteNonQuery("BAD QUERY"), Throws.Exception.TypeOf<PostgresException>());
                 Assert.That(!tx.IsCompleted);
                 tx.Rollback();
                 Assert.That(tx.IsCompleted);
-                Assert.That(conn.ExecuteScalar("SELECT COUNT(*) FROM data"), Is.EqualTo(0));
+                Assert.That(conn.ExecuteScalar($"SELECT COUNT(*) FROM {table}"), Is.EqualTo(0));
             }
         }
 
@@ -439,15 +446,22 @@ namespace Npgsql.Tests
         [Parallelizable(ParallelScope.None)]
         public void TransactionNotSupported()
         {
+            if (IsMultiplexing)
+            {
+                throw new NotImplementedException("Need to rethink/redo dummy transaction mode");
+            }
+
             var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
             {
-                ApplicationName = nameof(TransactionNotSupported)
+                ApplicationName = nameof(TransactionNotSupported) + IsMultiplexing
             }.ToString();
 
             NpgsqlDatabaseInfo.RegisterFactory(new NoTransactionDatabaseInfoFactory());
-            using (var conn = OpenConnection(connString))
-            using (var tx = conn.BeginTransaction())
+            try
             {
+                using var conn = OpenConnection(connString);
+                using var tx = conn.BeginTransaction();
+
                 // Detect that we're not really in a transaction
                 var prevTxId = conn.ExecuteScalar("SELECT txid_current()");
                 var nextTxId = conn.ExecuteScalar("SELECT txid_current()");
@@ -456,8 +470,10 @@ namespace Npgsql.Tests
                 Assert.That(nextTxId, Is.Not.EqualTo(prevTxId));
                 conn.Close();
             }
-
-            NpgsqlDatabaseInfo.ResetFactories();
+            finally
+            {
+                NpgsqlDatabaseInfo.ResetFactories();
+            }
 
             using (var conn = OpenConnection(connString))
             {
@@ -513,9 +529,10 @@ namespace Npgsql.Tests
 
                         t.Rollback();
                     }
-
                 }
             }
         }
+
+        public TransactionTests(MultiplexingMode multiplexingMode) : base(multiplexingMode) {}
     }
 }

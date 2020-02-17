@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Channels;
@@ -204,7 +205,6 @@ namespace Npgsql
                     var removed = TryRemoveFromWritableList(connector);
                     Debug.Assert(removed, "Connector wasn't found when removing from writable list");
                 }
-                connector.Connection = conn;
                 return new ValueTask<NpgsqlConnector>(connector);
             }
 
@@ -237,10 +237,7 @@ namespace Npgsql
                         // served), which is crucial to us.
                         connector = await _idleConnectorReader.ReadAsync(timeoutToken);
                         if (IsIdleConnectorValid(connector))
-                        {
-                            connector.Connection = conn;
                             return connector;
-                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -293,8 +290,7 @@ namespace Npgsql
             for (var numConnectors = _numConnectors; numConnectors < _max; numConnectors = _numConnectors)
             {
                 // Note that we purposefully don't use SpinWait for this: https://github.com/dotnet/coreclr/pull/21437
-                if (Interlocked.CompareExchange(ref _numConnectors, numConnectors + 1, numConnectors) !=
-                    numConnectors)
+                if (Interlocked.CompareExchange(ref _numConnectors, numConnectors + 1, numConnectors) != numConnectors)
                     continue;
 
                 try
@@ -637,16 +633,24 @@ namespace Npgsql
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         bool TryRemoveFromWritableList(NpgsqlConnector connector)
         {
-            var i = 0;
-            for (; i < _writableConnectors!.Length; i++)
+            for (var i = 0; i < _writableConnectors!.Length; i++)
+            {
                 if (_writableConnectors[i] == connector)
+                {
                     Volatile.Write(ref _writableConnectors[i], null);
-            return i < _writableConnectors.Length;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         void AddToWritableList(NpgsqlConnector connector)
         {
+            Debug.Assert(_writableConnectors.All(c => c != connector),
+                $"Connector already in {nameof(_writableConnectors)} when trying to add it");
+
             var i = 0;
             for (; i < _writableConnectors!.Length; i++)
             {
@@ -687,10 +691,7 @@ namespace Npgsql
             }
         }
 
-        internal bool TryRentEnlistedPending(
-            NpgsqlConnection connection,
-            Transaction transaction,
-            [NotNullWhen(true)] out NpgsqlConnector? connector)
+        internal bool TryRentEnlistedPending(Transaction transaction, [NotNullWhen(true)] out NpgsqlConnector? connector)
         {
             lock (_pendingEnlistedConnectors)
             {
@@ -703,7 +704,6 @@ namespace Npgsql
                 list.RemoveAt(list.Count - 1);
                 if (list.Count == 0)
                     _pendingEnlistedConnectors.Remove(transaction);
-                connector.Connection = connection;
                 return true;
             }
         }

@@ -11,6 +11,8 @@ using NUnit.Framework;
 
 namespace Npgsql.Tests
 {
+    [TestFixture(Tests.MultiplexingMode.NonMultiplexing)]
+    [TestFixture(Tests.MultiplexingMode.Multiplexing)]
     public class CommandTests : TestBase
     {
         #region Multiple Statements in a Command
@@ -1073,5 +1075,7 @@ namespace Npgsql.Tests
                 Assert.That(cmd.ExecuteScalar(), Is.EqualTo(9));
             }
         }
+
+        public CommandTests(MultiplexingMode multiplexingMode) : base(multiplexingMode) {}
     }
 }

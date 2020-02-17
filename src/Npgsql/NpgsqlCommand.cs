@@ -557,7 +557,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         Task Prepare(bool async)
         {
-            var connection = CheckReadyAndGetConnection();
+            var connection = CheckAndGetConnection();
             if (connection.Settings.Multiplexing)
                 throw new NotSupportedException("Explicit preparation not supported with multiplexing");
             var connector = connection.Connector!;
@@ -653,7 +653,7 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             if (_statements.All(s => !s.IsPrepared))
                 return;
 
-            var connection = CheckReadyAndGetConnection();
+            var connection = CheckAndGetConnection();
             if (connection.Settings.Multiplexing)
                 throw new NotSupportedException("Explicit preparation not supported with multiplexing");
             var connector = connection.Connector!;
@@ -1109,109 +1109,118 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
 
         async ValueTask<NpgsqlDataReader> ExecuteReaderAsync(CommandBehavior behavior, bool async, CancellationToken cancellationToken)
         {
-            var conn = CheckReadyAndGetConnection();
+            var conn = CheckAndGetConnection();
 
             try
             {
                 if (conn.IsBound(out var connector))
                 {
                     connector.StartUserAction(this);
-                    using var _ = cancellationToken.Register(cmd => ((NpgsqlCommand)cmd!).Cancel(), this);
-
-                    ValidateParameters(connector.TypeMapper);
-
-                    switch (IsExplicitlyPrepared)
+                    try
                     {
-                    case true:
-                        Debug.Assert(_connectorPreparedOn != null);
-                        if (_connectorPreparedOn != connector)
+                        using var _ = cancellationToken.Register(cmd => ((NpgsqlCommand)cmd!).Cancel(), this);
+
+                        ValidateParameters(connector.TypeMapper);
+
+                        switch (IsExplicitlyPrepared)
                         {
-                            // The command was prepared, but since then the connector has changed. Detach all prepared statements.
-                            foreach (var s in _statements)
-                                s.PreparedStatement = null;
-                            ResetExplicitPreparation();
-                            goto case false;
-                        }
-
-                        NpgsqlEventSource.Log.CommandStartPrepared();
-                        break;
-
-                    case false:
-                        ProcessRawQuery();
-
-                        if (connector.Settings.MaxAutoPrepare > 0)
-                        {
-                            var numPrepared = 0;
-                            foreach (var statement in _statements)
+                        case true:
+                            Debug.Assert(_connectorPreparedOn != null);
+                            if (_connectorPreparedOn != connector)
                             {
-                                // If this statement isn't prepared, see if it gets implicitly prepared.
-                                // Note that this may return null (not enough usages for automatic preparation).
-                                if (!statement.IsPrepared)
-                                    statement.PreparedStatement =
-                                        connector.PreparedStatementManager.TryGetAutoPrepared(statement);
-                                if (statement.PreparedStatement != null)
-                                    numPrepared++;
+                                // The command was prepared, but since then the connector has changed. Detach all prepared statements.
+                                foreach (var s in _statements)
+                                    s.PreparedStatement = null;
+                                ResetExplicitPreparation();
+                                goto case false;
                             }
 
-                            if (numPrepared > 0)
+                            NpgsqlEventSource.Log.CommandStartPrepared();
+                            break;
+
+                        case false:
+                            ProcessRawQuery();
+
+                            if (connector.Settings.MaxAutoPrepare > 0)
                             {
-                                _connectorPreparedOn = connector;
-                                if (numPrepared == _statements.Count)
-                                    NpgsqlEventSource.Log.CommandStartPrepared();
+                                var numPrepared = 0;
+                                foreach (var statement in _statements)
+                                {
+                                    // If this statement isn't prepared, see if it gets implicitly prepared.
+                                    // Note that this may return null (not enough usages for automatic preparation).
+                                    if (!statement.IsPrepared)
+                                        statement.PreparedStatement =
+                                            connector.PreparedStatementManager.TryGetAutoPrepared(statement);
+                                    if (statement.PreparedStatement != null)
+                                        numPrepared++;
+                                }
+
+                                if (numPrepared > 0)
+                                {
+                                    _connectorPreparedOn = connector;
+                                    if (numPrepared == _statements.Count)
+                                        NpgsqlEventSource.Log.CommandStartPrepared();
+                                }
                             }
+
+                            break;
                         }
 
-                        break;
-                    }
+                        State = CommandState.InProgress;
 
-                    State = CommandState.InProgress;
+                        if (Log.IsEnabled(NpgsqlLogLevel.Debug))
+                            LogCommand(connector.Id);
+                        NpgsqlEventSource.Log.CommandStart(CommandText);
 
-                    if (Log.IsEnabled(NpgsqlLogLevel.Debug))
-                        LogCommand(connector.Id);
-                    NpgsqlEventSource.Log.CommandStart(CommandText);
+                        // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
+                        lock (connector.CancelLock)
+                        {
+                        }
 
-                    // If a cancellation is in progress, wait for it to "complete" before proceeding (#615)
-                    lock (connector.CancelLock)
-                    {
-                    }
+                        connector.UserTimeout = CommandTimeout * 1000;
 
-                    connector.UserTimeout = CommandTimeout * 1000;
+                        // We do not wait for the entire send to complete before proceeding to reading -
+                        // the sending continues in parallel with the user's reading. Waiting for the
+                        // entire send to complete would trigger a deadlock for multi-statement commands,
+                        // where PostgreSQL sends large results for the first statement, while we're sending large
+                        // parameter data for the second. See #641.
+                        // Instead, all sends for non-first statements and for non-first buffers are performed
+                        // asynchronously (even if the user requested sync), in a special synchronization context
+                        // to prevents a dependency on the thread pool (which would also trigger deadlocks).
+                        // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
+                        // send functions can switch to the special async mode when needed.
 
-                    // We do not wait for the entire send to complete before proceeding to reading -
-                    // the sending continues in parallel with the user's reading. Waiting for the
-                    // entire send to complete would trigger a deadlock for multi-statement commands,
-                    // where PostgreSQL sends large results for the first statement, while we're sending large
-                    // parameter data for the second. See #641.
-                    // Instead, all sends for non-first statements and for non-first buffers are performed
-                    // asynchronously (even if the user requested sync), in a special synchronization context
-                    // to prevents a dependency on the thread pool (which would also trigger deadlocks).
-                    // The WriteBuffer notifies this command when the first buffer flush occurs, so that the
-                    // send functions can switch to the special async mode when needed.
-
-                    // TODO: Just await the entire thing for now, think about exactly what to do
-                    // (sync deadlock avoidance)
-                    await ((behavior & CommandBehavior.SchemaOnly) == 0
-                        ? WriteExecute(connector, async)
-                        : throw new NotImplementedException());
+                        // TODO: Just await the entire thing for now, think about exactly what to do
+                        // (sync deadlock avoidance)
+                        await ((behavior & CommandBehavior.SchemaOnly) == 0
+                            ? WriteExecute(connector, async)
+                            : throw new NotImplementedException());
                         // TODO: : SendExecuteSchemaOnly(connector, async);
 
-                    await connector.Flush(async);
+                        await connector.Flush(async);
 
-                    // The following is a hack. It raises an exception if one was thrown in the first phases
-                    // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
-                    // still happen later and aren't properly handled. See #1323.
-                    // if (sendTask.IsFaulted)
-                    //     sendTask.GetAwaiter().GetResult();
+                        // The following is a hack. It raises an exception if one was thrown in the first phases
+                        // of the send (i.e. in parts of the send that executed synchronously). Exceptions may
+                        // still happen later and aren't properly handled. See #1323.
+                        // if (sendTask.IsFaulted)
+                        //     sendTask.GetAwaiter().GetResult();
 
-                    // TODO: DRY the following with multiplexing, but be careful with the cancellation registration...
-                    var reader = connector.DataReader;
-                    reader.Init(this, behavior, _statements);
-                    connector.CurrentReader = reader;
-                    if (async)
-                        await reader.NextResultAsync(cancellationToken);
-                    else
-                        reader.NextResult();
-                    return reader;
+                        // TODO: DRY the following with multiplexing, but be careful with the cancellation registration...
+                        var reader = connector.DataReader;
+                        reader.Init(this, behavior, _statements);
+                        connector.CurrentReader = reader;
+                        if (async)
+                            await reader.NextResultAsync(cancellationToken);
+                        else
+                            reader.NextResult();
+                        return reader;
+                    }
+                    catch
+                    {
+                        connector.CurrentReader = null;
+                        conn.Connector?.EndUserAction();
+                        throw;
+                    }
                 }
                 else
                 {
@@ -1220,6 +1229,8 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     // TODO: Need to validate parameters (with pool-wide type mapper...)
                     ProcessRawQuery();
 
+                    State = CommandState.InProgress;
+
                     // TODO: Experiment: do we want to wait on *writing* here, or on *reading*?
                     // Previous behavior was to wait on reading, which throw the exception from ExecuteReader (and not from
                     // the first read). But waiting on writing would allow us to do sync writing and async reading.
@@ -1227,6 +1238,10 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
                     var written = conn.Pool!.MultiplexCommandWriter!.TryWrite(this);
                     Debug.Assert(written);
                     connector = await new ValueTask<NpgsqlConnector>(ExecutionCompletion, ExecutionCompletion.Version);
+                    // TODO: Overload of StartBindingScope?
+                    conn.Connector = connector;
+                    connector.Connection = conn;
+                    conn.ConnectorBindingScope = ConnectorBindingScope.Reader;
 
                     var reader = connector.DataReader;
                     reader.Init(this, behavior, _statements);
@@ -1242,7 +1257,6 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
             catch
             {
                 State = CommandState.Idle;
-                _connection!.Connector?.EndUserAction();
 
                 // TODO
                 // Close connection if requested even when there is an error.
@@ -1367,13 +1381,12 @@ GROUP BY pg_proc.proargnames, pg_proc.proargtypes, pg_proc.proallargtypes, pg_pr
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        NpgsqlConnection CheckReadyAndGetConnection()
+        NpgsqlConnection CheckAndGetConnection()
         {
             if (State == CommandState.Disposed)
                 throw new ObjectDisposedException(GetType().FullName);
             if (_connection == null)
                 throw new InvalidOperationException("Connection property has not been initialized.");
-            _connection.CheckReady();
             return _connection;
         }
 

@@ -1,31 +1,48 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
 
 namespace Npgsql.Tests
 {
     public abstract class TestBase
     {
         /// <summary>
-        /// The connection string that will be used when opening the connection to the tests database.
-        /// May be overridden in fixtures, e.g. to set special connection parameters
-        /// </summary>
-        public static string ConnectionString =>
-            Environment.GetEnvironmentVariable("NPGSQL_TEST_DB") ?? DefaultConnectionString;
-
-        /// <summary>
         /// Unless the NPGSQL_TEST_DB environment variable is defined, this is used as the connection string for the
         /// test database.
         /// </summary>
         const string DefaultConnectionString = "Server=localhost;Username=npgsql_tests;Password=npgsql_tests;Database=npgsql_tests;Timeout=0;Command Timeout=0;Multiplexing=false";
 
+        /// <summary>
+        /// The connection string that will be used when opening the connection to the tests database.
+        /// May be overridden in fixtures, e.g. to set special connection parameters
+        /// </summary>
+        public virtual string ConnectionString => _connectionString;
+
+        readonly string _connectionString;
+
+        protected TestBase(MultiplexingMode? multiplexingMode = null)
+        {
+            MultiplexingMode = multiplexingMode;
+
+            _connectionString = Environment.GetEnvironmentVariable("NPGSQL_TEST_DB") ?? DefaultConnectionString;
+
+            if (MultiplexingMode.HasValue)
+            {
+                // If the test requires multiplexing to be on or off, use a small cache to avoid reparsing and
+                // regenerating the connection string every time
+                _connectionString = _connStringCache.GetOrAdd((_connectionString, IsMultiplexing),
+                    tup => new NpgsqlConnectionStringBuilder(tup.ConnString)
+                    {
+                        Multiplexing = tup.IsMultiplexing
+                    }.ToString());
+            }
+        }
+
         #region Utilities for use by tests
 
         protected virtual NpgsqlConnection CreateConnection(string? connectionString = null)
-        {
-            if (connectionString == null)
-                connectionString = ConnectionString;
-            var conn = new NpgsqlConnection(connectionString);
-            return conn;
-        }
+            => new NpgsqlConnection(connectionString ?? ConnectionString);
 
         protected virtual NpgsqlConnection OpenConnection(string? connectionString = null)
         {
@@ -49,6 +66,13 @@ namespace Npgsql.Tests
 
         protected NpgsqlConnection OpenConnection(NpgsqlConnectionStringBuilder csb)
             => OpenConnection(csb.ToString());
+
+        protected bool IsMultiplexing => MultiplexingMode == Tests.MultiplexingMode.Multiplexing;
+
+        protected MultiplexingMode? MultiplexingMode { get; }
+
+        readonly ConcurrentDictionary<(string ConnString, bool IsMultiplexing), string> _connStringCache
+            = new ConcurrentDictionary<(string ConnString, bool IsMultiplexing), string>();
 
         // In PG under 9.1 you can't do SELECT pg_sleep(2) in binary because that function returns void and PG doesn't know
         // how to transfer that. So cast to text server-side.

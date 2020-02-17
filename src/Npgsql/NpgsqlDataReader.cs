@@ -831,8 +831,14 @@ namespace Npgsql
             Connector.EndUserAction();
             NpgsqlEventSource.Log.CommandStop();
 
-            if (!Connector.IsBound)
+            if (_connection.ConnectorBindingScope == ConnectorBindingScope.Reader)
+            {
+                // TODO: Refactor...
+                _connection.Connector = null;
+                Connector.Connection = null;
+                _connection.ConnectorBindingScope = ConnectorBindingScope.None;
                 Connector.ReaderCompleted.SetResult(null);
+            }
 
             // If the reader is being closed as part of the connection closing, we don't apply
             // the reader's CommandBehavior.CloseConnection

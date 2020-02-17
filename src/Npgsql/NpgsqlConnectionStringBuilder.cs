@@ -1134,7 +1134,7 @@ namespace Npgsql
         [Description("Enables multiplexing, which allows more efficient use of connections.")]
         [DisplayName("Multiplexing")]
         [NpgsqlConnectionStringProperty]
-        [DefaultValue(true)] // TODO: false
+        [DefaultValue(false)]
         public bool Multiplexing
         {
             get => _multiplexing;
@@ -1155,7 +1155,7 @@ namespace Npgsql
                      "commands before flushing to the network. In microseconds, 0 disables waiting altogether.")]
         [DisplayName("Write Coalescing Delay Us")]
         [NpgsqlConnectionStringProperty]
-        [DefaultValue(500)] // TODO: this should probably default to 0
+        [DefaultValue(0)]
         public int WriteCoalescingDelayUs
         {
             get => _writeCoalescingDelayUs;
@@ -1176,7 +1176,7 @@ namespace Npgsql
                      "flushing to the network.")]
         [DisplayName("Write Coalescing Buffer Threshold Bytes")]
         [NpgsqlConnectionStringProperty]
-        [DefaultValue(900)] // TODO: Figure out what we really want to default to be.
+        [DefaultValue(1000)]
         public int WriteCoalescingBufferThresholdBytes
         {
             get => _writeCoalescingBufferThresholdBytes;
